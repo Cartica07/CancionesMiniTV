@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simulador de canción OLED</title>
+<style>
+  :root {
+    --bg: #0b0e0d; --panel: #121614; --panel-2: #171c1a; --line: #23302b;
+    --ink: #d9f5e8; --ink-dim: #7fa998; --accent: #5be8b0; --accent-dim: #2b6b54;
+    --warn: #e8c05b; --danger: #e8746b;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #eef5f1; --panel: #ffffff; --panel-2: #f4f8f6; --line: #cfe0d8;
+      --ink: #10241c; --ink-dim: #4c6a5d; --accent: #0e9e6f; --accent-dim: #b6e9d5; --warn: #a67615;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0e0d; --panel: #121614; --panel-2: #171c1a; --line: #23302b;
+    --ink: #d9f5e8; --ink-dim: #7fa998; --accent: #5be8b0; --accent-dim: #2b6b54; --warn: #e8c05b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    padding-top: env(safe-area-inset-top,0px); padding-bottom: env(safe-area-inset-bottom,0px); }
+  body { padding: 20px 18px 50px; }
+  .envoltorio { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 2px; }
+  .subtitulo { color: var(--ink-dim); font-size: .85rem; margin: 0 0 20px; }
+  .barra-superior {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 18px;
+  }
+  .barra-superior input[type="text"] {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--ink);
+    padding: 7px 10px; border-radius: 6px; font-size: .82rem; width: 180px;
+  }
+  .spacer { flex: 1; }
+  button {
+    background: var(--accent); color: #04140d; border: none; border-radius: 6px;
+    padding: 8px 14px; font-size: .8rem; font-weight: 600; cursor: pointer;
+  }
+  button.secundario { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button.chico { padding: 5px 9px; font-size: .72rem; }
+  button.peligro { background: var(--danger); color: #2a0705; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  input[type="file"] { display: none; }
+  .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .panel h2 { font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-dim);
+    margin: 0 0 12px; font-weight: 600; }
+  .oled-marco { background: #000; border-radius: 10px; padding: 14px; border: 1px solid var(--line); }
+  canvas#pantallaOled { width: 100%; aspect-ratio: 128/64; display: block; image-rendering: pixelated; }
+  .transporte { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  .tiempo { font-size: .74rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+  .fila-scrub { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .estado-nota { font-size: .72rem; color: var(--ink-dim); margin-top: 8px; }
+  .lista-eventos { display: flex; flex-direction: column; gap: 10px; max-height: 480px; overflow-y: auto; padding-right: 4px; }
+  .evento {
+    border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel-2);
+  }
+  .evento-cabecera { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .badge { font-size: .66rem; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px;
+    border-radius: 10px; background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+  .badge.imagen { background: #3a2f6b; color: #b7a8ff; }
+  .evento-tiempo { font-size: .72rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .evento-cabecera .spacer { flex: 1; }
+  .campos-evento { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+  .campos-evento.una-col { grid-template-columns: 1fr; }
+  .campo-mini label { display: block; font-size: .66rem; color: var(--ink-dim); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .04em; }
+  .campo-mini input[type="text"], .campo-mini select, .campo-mini input[type="number"] {
+    width: 100%; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+    padding: 6px 8px; border-radius: 5px; font-size: .78rem;
+  }
+  .acciones-evento { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .sin-eventos, .sin-imagenes { color: var(--ink-dim); font-size: .82rem; padding: 20px 10px; text-align: center; }
+  .botones-agregar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+
+  .zona-carga-img {
+    border: 1.5px dashed var(--line); border-radius: 8px; padding: 16px; text-align: center;
+    cursor: pointer; font-size: .78rem; color: var(--ink-dim); margin-bottom: 12px;
+  }
+  .zona-carga-img.sobre { border-color: var(--accent); }
+  .mini-controles-img { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+  .fila-check-mini { display: flex; align-items: center; justify-content: space-between; font-size: .78rem; }
+  .fila-umbral-mini .rot { display: flex; justify-content: space-between; font-size: .74rem; margin-bottom: 4px; }
+  .fila-umbral-mini .rot b { color: var(--accent); }
+  .previsualizacion-img { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+  canvas#previewImgTmp { width: 128px; height: 64px; background: #000; image-rendering: pixelated; border-radius: 4px; border: 1px solid var(--line); flex-shrink: 0; }
+  .galeria-imagenes { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px,1fr)); gap: 10px; }
+  .item-galeria { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+  .item-galeria canvas { width: 100%; aspect-ratio: 128/64; image-rendering: pixelated; background: #000; display: block; }
+  .item-galeria .nombre-item { font-size: .68rem; padding: 4px 6px; text-align: center; color: var(--ink-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-galeria .borrar-item { width: 100%; border: none; border-top: 1px solid var(--line); background: transparent;
+    color: var(--danger); font-size: .66rem; padding: 3px; cursor: pointer; }
+  .aviso { font-size: .74rem; padding: 8px 10px; border-radius: 6px; margin-top: 10px; }
+  .aviso.ok { background: var(--accent-dim); color: var(--accent); }
+  .aviso.error { background: #4a1f1c; color: var(--danger); }
+  textarea#pegarIno { width: 100%; min-height: 120px; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink); border-radius: 6px; padding: 8px; font-family: monospace; font-size: .75rem; }
+  .modal-fondo { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center;
+    justify-content: center; z-index: 50; padding: 20px; }
+  .modal-fondo.abierto { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px;
+    max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .tab-btn { background: transparent; border: 1px solid var(--line); color: var(--ink-dim); }
+  .tab-btn.activo { background: var(--accent); color: #04140d; border-color: var(--accent); }
+  .linea-ed { border:1px solid var(--line); border-radius:6px; padding:8px; margin-top:8px; background:var(--panel); }
+  .linea-ed .fila { display:flex; gap:6px; align-items:center; margin-bottom:6px; }
+  .linea-ed .fila:last-child { margin-bottom:0; }
+  .linea-ed input[type=text] { flex:1; min-width:0; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:6px 8px; border-radius:5px; font-size:.78rem; }
+  .linea-ed input[type=range] { flex:1; min-width:0; }
+  .linea-ed select { background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:5px; border-radius:5px; font-size:.74rem; }
+  .linea-ed .rot { font-size:.66rem; color:var(--ink-dim); width:14px; }
+  .linea-ed .val { font-size:.74rem; width:28px; text-align:right; font-variant-numeric:tabular-nums; color:var(--accent); }
+  .linea-ed .solo-adv { display:none; } body.avanzado .linea-ed .solo-adv { display:flex; }
+  .chk-adv { font-size:.78rem; display:flex; align-items:center; gap:6px; cursor:pointer; }
+  .fila-mp3 { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; font-size:.72rem; color:var(--ink-dim); }
+  .fila-mp3 select { background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:4px 6px; border-radius:5px; font-size:.72rem; }
+  .fila-mp3 input[type=number] { width:60px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:4px 6px; border-radius:5px; }
+</style>
+</head>
+<body>
+<div class="envoltorio">
+  <h1>Simulador de canción OLED</h1>
+  <p class="subtitulo">Importá un .ino (estructura nueva con nota()/letra() o LCD viejo), poné el texto donde quieras, con tamaño y posición exacta, y exportá el .ino final.</p>
+
+  <div class="barra-superior">
+    <select id="selectorProyecto" style="background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:7px 10px; border-radius:6px; font-size:.82rem;"></select>
+    <button class="secundario chico" id="btnNuevoProyecto">+ Nuevo proyecto</button>
+    <button class="secundario chico peligro" id="btnBorrarProyecto">🗑 Borrar proyecto</button>
+    <input type="text" id="inputNombreCancion" placeholder="nombre_de_la_cancion" value="cancion" style="display:none;" />
+    <button class="secundario" id="btnImportarIno">Importar .ino</button>
+    <button class="secundario" id="btnCargarJson">Cargar JSON</button>
+    <button class="secundario" id="btnGuardarJson">Guardar JSON</button>
+    <label class="chk-adv"><input type="checkbox" id="chkAvanzado"> Menú avanzado (X/Y por píxel)</label>
+    <span class="spacer"></span>
+    <button id="btnExportarIno">Exportar .ino</button>
+    <input type="file" id="fileIno" accept=".ino,.txt,.pde" />
+    <input type="file" id="fileJson" accept=".json" />
+  </div>
+
+  <div class="grid">
+    <!-- columna izquierda: pantalla + transporte -->
+    <div>
+      <div class="panel">
+        <h2>Pantalla virtual</h2>
+        <div class="oled-marco">
+          <canvas id="pantallaOled" width="128" height="64"></canvas>
+        </div>
+        <div class="fila-scrub">
+          <button class="chico" id="btnPlay">▶ Reproducir</button>
+          <button class="chico secundario" id="btnStop">■ Detener</button>
+        </div>
+        <div class="transporte">
+          <span class="tiempo" id="tiempoActual">0:00.0</span>
+          <input type="range" id="scrub" min="0" max="1000" value="0" step="1" />
+          <span class="tiempo" id="tiempoTotal">0:00.0</span>
+        </div>
+        <p class="estado-nota" id="estadoNota">Sin canción cargada.</p>
+        <div class="fila-mp3">
+          <button class="chico secundario" id="btnMp3">🎧 Cargar mp3</button>
+          <input type="file" id="fileMp3" accept="audio/*" />
+          <span id="estadoMp3">sin mp3</span>
+          <select id="selSonido"><option value="mp3">Suena: mp3</option><option value="tono">Suena: tono del ino</option><option value="ambos">Suena: ambos</option></select>
+          <span>desfase</span><input type="number" id="desfaseMp3" value="40" step="10" /><span>ms</span>
+        </div>
+        <audio id="audioRef"></audio>
+      </div>
+    </div>
+
+    <!-- columna derecha: eventos / imagenes -->
+    <div class="panel">
+      <div class="tabs">
+        <button class="tab-btn activo" id="tabEventosBtn">Eventos</button>
+        <button class="tab-btn" id="tabImagenesBtn">🖼 Galería de imágenes</button>
+      </div>
+
+      <div id="panelEventos">
+        <div class="botones-agregar">
+          <button class="chico" id="btnAgregarTexto">+ Evento de texto acá</button>
+          <button class="chico secundario" id="btnAgregarImagen">+ Evento de imagen acá</button>
+          <button class="chico secundario" id="btnSubirImagenAca">⬆ Subir imagen y usarla acá</button>
+          <input type="file" id="fileImgEvento" accept="image/*" />
+        </div>
+        <div class="lista-eventos" id="listaEventos">
+          <p class="sin-eventos">Importá un .ino o cargá un JSON para empezar.</p>
+        </div>
+      </div>
+
+      <div id="panelImagenes" style="display:none;">
+        <div class="zona-carga-img" id="zonaCargaImg">Hacé clic o arrastrá una imagen para convertirla</div>
+        <input type="file" id="fileImg" accept="image/*" />
+        <div class="previsualizacion-img">
+          <canvas id="previewImgTmp" width="128" height="64"></canvas>
+          <div class="mini-controles-img" style="flex:1;">
+            <div class="fila-check-mini">
+              <span>Difuminado (dithering)</span>
+              <input type="checkbox" id="chkDitheringMini" checked />
+            </div>
+            <div class="fila-umbral-mini">
+              <div class="rot"><span>Umbral</span><b id="valorUmbralMini">127</b></div>
+              <input type="range" id="umbralMini" min="0" max="255" value="127" />
+            </div>
+            <div class="campo-mini">
+              <label>Nombre</label>
+              <input type="text" id="nombreImgTmp" placeholder="img_ejemplo" />
+            </div>
+            <button class="chico" id="btnAgregarGaleria" disabled>Agregar a la galería</button>
+          </div>
+        </div>
+        <h2 style="margin-top:16px;">Galería</h2>
+        <div class="galeria-imagenes" id="galeriaImagenes">
+          <p class="sin-imagenes">Sin imágenes todavía.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-fondo" id="modalIno">
+  <div class="modal">
+    <h2 style="margin-top:0;">Importar .ino</h2>
+    <p class="subtitulo" style="margin-bottom:10px;">Subí el archivo o pegá el código directamente.</p>
+    <button class="secundario chico" id="btnElegirArchivoIno">Elegir archivo</button>
+    <textarea id="pegarIno" placeholder="Pegá acá el .ino (estructura nueva con nota()/letra(), o LCD 16x2)..." style="margin-top:10px;"></textarea>
+    <label class="chk-adv" style="margin-top:10px;"><input type="checkbox" id="chkModoParche"> Mantener los tiempos de letra y la estructura original del .ino (modo parche avanzado)</label>
+    <p class="descripcion-campo" style="font-size:.72rem; color:var(--ink-dim); margin:4px 0 0;">Desmarcado (recomendado): solo se importa la melodía — arrancás con la pantalla en blanco y agregás todo el texto vos, con libertad total para mover cada tiempo.</p>
+    <div style="display:flex; gap:8px; margin-top:12px; justify-content:flex-end;">
+      <button class="secundario chico" id="btnCancelarImportar">Cancelar</button>
+      <button class="chico" id="btnConfirmarImportar">Importar</button>
+    </div>
+    <div id="avisoImportar"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const ANCHO = 128, ALTO = 64;
+
+  // ==================== estado ====================
+  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {} };
+
+  // ==================== proyectos guardados (localStorage) ====================
+  const CLAVE_PROYECTOS = 'oled_sim_proyectos_v1';
+  const CLAVE_ACTUAL = 'oled_sim_proyecto_actual_v1';
+  function cargarProyectos() {
+    try { return JSON.parse(localStorage.getItem(CLAVE_PROYECTOS)) || {}; } catch (e) { return {}; }
+  }
+  function guardarProyectos(obj) {
+    try { localStorage.setItem(CLAVE_PROYECTOS, JSON.stringify(obj)); } catch (e) { console.error('no se pudo guardar en localStorage', e); }
+  }
+  function guardarProyectoActual() {
+    const nombre = localStorage.getItem(CLAVE_ACTUAL);
+    if (!nombre) return;
+    const todos = cargarProyectos();
+    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, meta: escena.meta || [], src: escena.src || null, actualizado: Date.now() };
+    guardarProyectos(todos);
+  }
+  function renderSelectorProyectos() {
+    const sel = document.getElementById('selectorProyecto');
+    const todos = cargarProyectos();
+    const actual = localStorage.getItem(CLAVE_ACTUAL);
+    sel.innerHTML = '';
+    Object.keys(todos).sort().forEach(n => {
+      const opt = document.createElement('option'); opt.value = n; opt.textContent = n;
+      if (n === actual) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+  function activarProyecto(nombre, crearSiNoExiste) {
+    const todos = cargarProyectos();
+    if (!todos[nombre]) {
+      if (!crearSiNoExiste) return false;
+      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, meta: [], src: null, actualizado: Date.now() };
+      guardarProyectos(todos);
+    }
+    const p = todos[nombre];
+    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, meta: p.meta || [], src: p.src || null };
+    localStorage.setItem(CLAVE_ACTUAL, nombre);
+    document.getElementById('inputNombreCancion').value = nombre;
+    recalcularTimeline(); renderEventos(); renderGaleria(); renderSelectorProyectos();
+    posicionMs = 0; actualizarEnPosicion(0, false);
+    return true;
+  }
+  document.getElementById('selectorProyecto').addEventListener('change', (e) => {
+    guardarProyectoActual(); activarProyecto(e.target.value, false);
+  });
+  document.getElementById('btnNuevoProyecto').addEventListener('click', () => {
+    const nombre = (prompt('Nombre del nuevo proyecto:') || '').trim();
+    if (!nombre) return;
+    guardarProyectoActual();
+    if (!activarProyecto(nombre, true)) return;
+    if (!cargarProyectos()[nombre]) return;
+  });
+  document.getElementById('btnBorrarProyecto').addEventListener('click', () => {
+    const actual = localStorage.getItem(CLAVE_ACTUAL);
+    if (!actual) return;
+    if (!confirm('¿Borrar el proyecto "' + actual + '"? Esto no se puede deshacer.')) return;
+    const todos = cargarProyectos();
+    delete todos[actual];
+    guardarProyectos(todos);
+    const restantes = Object.keys(todos);
+    activarProyecto(restantes[0] || 'Proyecto 1', true);
+  });
+  window.addEventListener('beforeunload', guardarProyectoActual);
+  setInterval(guardarProyectoActual, 2500);
+
+  let inicioMs = [0]; // inicioMs[i] = tiempo de inicio (ms) de la nota i
+  let duracionTotalMs = 0;
+  let posicionMs = 0;
+  let reproduciendo = false;
+  let ultimoTimestamp = null;
+
+  let audioCtx = null, osc = null, gainNode = null;
+  const audioRef = document.getElementById('audioRef'); let usarMp3 = false; let modoSonido = 'mp3';
+  const desfase = () => parseFloat(document.getElementById('desfaseMp3').value) || 0;
+  function sincronizarMp3() {
+    if (!usarMp3) return;
+    if (reproduciendo) { audioRef.currentTime = (posicionMs + desfase()) / 1000; audioRef.play(); } else audioRef.pause();
+  }
+  function irMp3(ms) { if (usarMp3) { audioRef.pause(); audioRef.currentTime = (ms + desfase()) / 1000; } }
+
+  // ---- modelo de texto: cada linea = {t, tam, x, y, ah, av}; ah/av = izq|centro|der|libre y arriba|centro|abajo|libre ----
+  const L = (t, tam, x, y) => ({ t, tam, x, y, ah: 'libre', av: 'libre' });
+  const nuevaLinea = (t, tam, ah, av) => ({ t, tam, x: 0, y: 0, ah, av });
+  const txtOled = (t) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '?');
+  const anchoTxt = (l) => Math.max(0, txtOled(l.t).length * 6 * l.tam - l.tam);
+  function posX(l) { return l.ah === 'izq' ? 0 : l.ah === 'centro' ? Math.round((ANCHO - anchoTxt(l)) / 2) : l.ah === 'der' ? ANCHO - anchoTxt(l) : l.x; }
+  function posY(l) { const h = 8 * l.tam; return l.av === 'arriba' ? 0 : l.av === 'centro' ? Math.round((ALTO - h) / 2) : l.av === 'abajo' ? ALTO - h : l.y; }
+  function migrar(ev) {
+    if (ev.tipo === 'texto' && !ev.lineas) {
+      ev.lineas = [];
+      if (ev.linea1) ev.lineas.push(L(ev.linea1, ev.tamano || 1, 0, ev.y1 ?? 8));
+      if (ev.linea2) ev.lineas.push(L(ev.linea2, ev.tamano || 1, 0, ev.y2 ?? 40));
+    }
+    return ev;
+  }
+
+  // ==================== interprete .ino -> escena (con scope, parametros, for) ====================
+// ============ interprete C->escena: soporta funciones con parametros,
+// scope local encadenado, reasignaciones, for(), y detecta notas
+// directamente en cualquier llamada a tone(pin,freq,dur) sin importar
+// el nombre de la funcion que la contenga. ============
+
+function quitarComentarios(src) {
+  let out = '', i = 0, n = src.length, enString = false;
+  while (i < n) {
+    const c = src[i];
+    if (enString) {
+      out += c;
+      if (c === '\\' && i + 1 < n) { out += src[i + 1]; i += 2; continue; }
+      if (c === '"') enString = false;
+      i++; continue;
+    }
+    if (c === '"') { enString = true; out += c; i++; continue; }
+    if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+    if (c === '/' && src[i + 1] === '*') { i += 2; while (i + 1 < n && !(src[i] === '*' && src[i + 1] === '/')) i++; i += 2; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
+class Scope {
+  constructor(padre) { this.vars = {}; this.padre = padre || null; }
+  get(nombre) {
+    let s = this;
+    while (s) { if (nombre in s.vars) return s.vars[nombre]; s = s.padre; }
+    throw new Error('variable desconocida: ' + nombre);
+  }
+  setExistente(nombre, valor) {
+    let s = this;
+    while (s) { if (nombre in s.vars) { s.vars[nombre] = valor; return true; } s = s.padre; }
+    return false;
+  }
+  declarar(nombre, valor) { this.vars[nombre] = valor; }
+}
+
+function crearEvaluadorScope() {
+  function tokenizar(s) {
+    const toks = []; let i = 0;
+    while (i < s.length) {
+      const c = s[i];
+      if (/\s/.test(c)) { i++; continue; }
+      if (/[0-9.]/.test(c)) { let j = i; while (j < s.length && /[0-9.]/.test(s[j])) j++; toks.push({ t: 'num', v: parseFloat(s.slice(i, j)) }); i = j; }
+      else if (/[A-Za-z_]/.test(c)) { let j = i; while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j++; toks.push({ t: 'name', v: s.slice(i, j) }); i = j; }
+      else if ('+-*/()'.includes(c)) { toks.push({ t: c }); i++; }
+      else { i++; }
+    }
+    return toks;
+  }
+  return function evaluarExpr(expr, scope) {
+    const toks = tokenizar(expr); let pos = 0;
+    function peek() { return toks[pos]; }
+    function factor() {
+      const tok = toks[pos];
+      if (!tok) throw new Error('expresion vacia');
+      if (tok.t === 'num') { pos++; return tok.v; }
+      if (tok.t === 'name') { pos++; return scope.get(tok.v); }
+      if (tok.t === '(') { pos++; const v = suma(); pos++; return v; }
+      if (tok.t === '-') { pos++; return -factor(); }
+      throw new Error('token inesperado');
+    }
+    function termino() {
+      let v = factor();
+      while (peek() && (peek().t === '*' || peek().t === '/')) {
+        const op = toks[pos].t; pos++; const r = factor();
+        if (op === '*') v = v * r; else { const q = v / r; v = q >= 0 ? Math.floor(q) : -Math.floor(-q); }
+      }
+      return v;
+    }
+    function suma() {
+      let v = termino();
+      while (peek() && (peek().t === '+' || peek().t === '-')) {
+        const op = toks[pos].t; pos++; const r = termino();
+        v = op === '+' ? v + r : v - r;
+      }
+      return v;
+    }
+    return suma();
+  };
+}
+const evaluarExpr = crearEvaluadorScope();
+
+function encontrarFunciones(src) {
+  const funcs = {};
+  const re = /void\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*\{/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const nombre = m[1], paramsTxt = m[2];
+    const params = paramsTxt.split(',').map(p => p.trim()).filter(p => p).map(p => p.split(/\s+/).pop());
+    let i = re.lastIndex, depth = 1;
+    while (i < src.length && depth > 0) { if (src[i] === '{') depth++; else if (src[i] === '}') depth--; i++; }
+    funcs[nombre] = { params, cuerpo: src.slice(re.lastIndex, i - 1) };
+  }
+  return funcs;
+}
+
+function parsearGlobales(srcSinFunciones) {
+  const scope = new Scope();
+  const re = /int\s+([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
+  let m;
+  while ((m = re.exec(srcSinFunciones)) !== null) {
+    try { scope.declarar(m[1], Math.trunc(evaluarExpr(m[2], scope))); } catch (e) {}
+  }
+  return scope;
+}
+
+function encontrarCierreBloque(texto, inicioLlave) {
+  let depth = 0, i = inicioLlave;
+  while (i < texto.length) {
+    if (texto[i] === '{') depth++;
+    else if (texto[i] === '}') { depth--; if (depth === 0) return i + 1; }
+    i++;
+  }
+  return texto.length;
+}
+
+function dividirSentencias(cuerpo) {
+  const sentencias = []; let i = 0, n = cuerpo.length;
+  while (i < n) {
+    while (i < n && /\s/.test(cuerpo[i])) i++;
+    if (i >= n) break;
+    const resto = cuerpo.slice(i);
+    const mBloque = resto.match(/^(for|if)\s*\(/);
+    if (mBloque) {
+      const inicioPar = i + resto.indexOf('(');
+      let depth = 0, j = inicioPar;
+      while (j < n) { if (cuerpo[j] === '(') depth++; else if (cuerpo[j] === ')') { depth--; if (depth === 0) break; } j++; }
+      let k = j + 1;
+      while (k < n && /\s/.test(cuerpo[k])) k++;
+      if (cuerpo[k] === '{') {
+        const fin = encontrarCierreBloque(cuerpo, k);
+        sentencias.push(cuerpo.slice(i, fin)); i = fin; continue;
+      } else {
+        const fin = cuerpo.indexOf(';', k) + 1;
+        sentencias.push(cuerpo.slice(i, fin)); i = fin; continue;
+      }
+    }
+    const fin = cuerpo.indexOf(';', i);
+    if (fin === -1) break;
+    sentencias.push(cuerpo.slice(i, fin + 1)); i = fin + 1;
+  }
+  return sentencias;
+}
+
+function separarArgs(s) {
+  const args = []; let depth = 0, cur = '';
+  for (const ch of s) {
+    if (ch === '(') depth++; else if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { args.push(cur); cur = ''; } else cur += ch;
+  }
+  if (cur.trim()) args.push(cur);
+  return args.map(a => a.trim());
+}
+function stringsLiterales(s) { const out = []; const re = /"([^"]*)"/g; let m; while ((m = re.exec(s)) !== null) out.push(m[1]); return out; }
+
+class Interprete {
+  constructor(funcs, globalScope) {
+    this.funcs = funcs; this.globalScope = globalScope;
+    this.notas = []; this.eventos = []; this.linea1Actual = '';
+    this.meta = []; this.grupo = null; this.prof = 0; this.invs = {}; this.pend = null;
+    this.nuevo = false; this.ajuste = 10000; this.art = 100; this.sil = 10;
+    this.pasos = 0; this.LIMITE_PASOS = 300000;
+  }
+  registrar(pares) {
+    const g = this.grupo, m = { g: g ? g.n : null, k: g ? g.k++ : -1, inv: g ? g.inv : 0 };
+    pares.forEach(p => { this.notas.push(p); this.meta.push(m); });
+  }
+  ultimasLineas() {
+    const u = this.eventos.filter(e => e.tipo === 'texto').pop();
+    return u ? u.lineas.map(l => ({ ...l })) : [];
+  }
+  ejecutarCuerpo(cuerpo, scope) {
+    for (const stmtRaw of dividirSentencias(cuerpo)) {
+      this.pasos++;
+      if (this.pasos > this.LIMITE_PASOS) throw new Error('limite de pasos excedido (posible bucle infinito)');
+      const stmt = stmtRaw.trim();
+      if (!stmt) continue;
+      this.ejecutarSentencia(stmt, scope);
+    }
+  }
+  ejecutarSentencia(stmt, scope) {
+    let m;
+    m = stmt.match(/^for\s*\(\s*int\s+([A-Za-z_]\w*)\s*=\s*([^;]+);\s*\1\s*(<=|<)\s*([^;]+);\s*\1\s*\+\+\s*\)\s*\{([\s\S]*)\}\s*$/);
+    if (m) {
+      const [, varName, exprA, op, exprB, cuerpoFor] = m;
+      const a = evaluarExpr(exprA, scope), b = evaluarExpr(exprB, scope);
+      const fin = op === '<=' ? b : b - 1;
+      for (let val = a; val <= fin; val++) {
+        const sub = new Scope(scope); sub.declarar(varName, val);
+        this.ejecutarCuerpo(cuerpoFor, sub);
+      }
+      return;
+    }
+    m = stmt.match(/^int\s+([A-Za-z_]\w*)\s*=\s*(.+);$/);
+    if (m) { try { scope.declarar(m[1], evaluarExpr(m[2], scope)); } catch (e) {} return; }
+
+    m = stmt.match(/^([A-Za-z_]\w*)\s*=\s*([^=].*);$/);
+    if (m) {
+      try {
+        const valor = evaluarExpr(m[2], scope);
+        if (!scope.setExistente(m[1], valor)) scope.declarar(m[1], valor);
+      } catch (e) {}
+      return;
+    }
+
+    m = stmt.match(/^([A-Za-z_]\w*)\s*\(([\s\S]*)\)\s*;$/);
+    if (m) {
+      const nombre = m[1], argsTxt = m[2];
+      const args = argsTxt.trim() ? separarArgs(argsTxt) : [];
+
+      if (this.nuevo) {
+        try {
+          const s = stringsLiterales(argsTxt);
+          const num = i => Math.round(evaluarExpr(args[i], scope));
+          if (nombre === 'nota' || nombre === 'notaL') {
+            const f = num(0), tot = Math.round(2 * evaluarExpr(args[1], scope) * this.ajuste / 10000);
+            const suena = nombre === 'notaL' ? tot : Math.round(tot * this.art / 100);
+            const fr = f <= this.sil ? 0 : f;
+            this.registrar(tot > suena ? [[fr, suena], [0, tot - suena]] : [[fr, suena]]);
+            return;
+          }
+          if (nombre === 'borra') { this.pend = { lineas: [] }; return; }
+          if (nombre === 'linea') { if (!this.pend) this.pend = { lineas: this.ultimasLineas() }; this.pend.lineas.push(L(s[0] || '', num(0), num(1), num(2))); return; }
+          if (nombre === 'muestra') { if (this.pend) this.eventos.push({ nota: this.notas.length, tipo: 'texto', lineas: this.pend.lineas }); this.pend = null; return; }
+          if (nombre === 'letra' || nombre === 'agrega') {
+            const conTam = !/^\s*"/.test(args[0]);
+            const mx = Math.max(0, ...s.map(x => x.length));
+            const tam = conTam ? num(0) : (mx <= 7 ? 3 : mx <= 10 ? 2 : 1);
+            const uno = args.length === (conTam ? 2 : 1);
+            const l1 = s[0] || '', l2 = s[1] || '';
+            let lineas;
+            if (nombre === 'agrega') lineas = this.ultimasLineas().concat([L(l1, tam, 0, 34)]);
+            else { lineas = []; if (l1) lineas.push(L(l1, tam, 0, (conTam && uno) ? 32 - 4 * tam : 30 - 8 * tam)); if (l2) lineas.push(L(l2, tam, 0, 34)); }
+            this.eventos.push({ nota: this.notas.length, tipo: 'texto', lineas });
+            return;
+          }
+        } catch (e) { return; }
+      }
+      if (nombre === 'tone') {
+        try {
+          const freq = Math.round(evaluarExpr(args[1], scope));
+          const dur = Math.round(evaluarExpr(args[2], scope));
+          this.registrar([[freq, dur], [0, dur]]);
+        } catch (e) {}
+        return;
+      }
+      if (nombre === 'textopan') {
+        const s = stringsLiterales(argsTxt);
+        const l1 = (s[0] || '').trim(), l2 = (s[1] || '').trim();
+        this.eventos.push({ nota: this.notas.length, tipo: 'texto', lineas: [L(l1, 1, 0, 8), L(l2, 1, 0, 40)].filter(x => x.t) });
+        this.linea1Actual = l1;
+        return;
+      }
+      if (nombre === 'textoAbajo') {
+        const s = stringsLiterales(argsTxt);
+        const l2 = (s[0] || '').trim();
+        this.eventos.push({ nota: this.notas.length, tipo: 'texto', lineas: [L(this.linea1Actual, 1, 0, 8), L(l2, 1, 0, 40)].filter(x => x.t) });
+        return;
+      }
+      if (this.funcs[nombre]) {
+        const { params, cuerpo } = this.funcs[nombre];
+        const nuevoScope = new Scope(this.globalScope);
+        params.forEach((pname, i) => {
+          if (i < args.length) {
+            try { nuevoScope.declarar(pname, evaluarExpr(args[i], scope)); } catch (e) { nuevoScope.declarar(pname, 0); }
+          }
+        });
+        if (this.prof === 0) { const inv = this.invs[nombre] = (this.invs[nombre] ?? -1) + 1; this.grupo = { n: nombre, k: 0, inv }; }
+        this.prof++;
+        this.ejecutarCuerpo(cuerpo, nuevoScope);
+        this.prof--;
+        if (this.prof === 0) this.grupo = null;
+        return;
+      }
+      return; // delay, noTone, suenaRele, pinMode, etc: se ignoran
+    }
+    // cualquier otra cosa (lcd.setCursor, etc.) se ignora
+  }
+}
+
+function convertirInoAEscena(src, nombre) {
+  const sinComentarios = quitarComentarios(src);
+  const funcs = encontrarFunciones(sinComentarios);
+  let sinFunciones = sinComentarios;
+  Object.values(funcs).forEach(f => { sinFunciones = sinFunciones.split(f.cuerpo).join(''); });
+  const globalScope = parsearGlobales(sinFunciones);
+
+  const interp = new Interprete(funcs, globalScope);
+  interp.nuevo = /void\s+notaL\s*\(/.test(sinComentarios);
+  const gv = (n, d) => { try { return globalScope.get(n); } catch (e) { return d; } };
+  interp.ajuste = gv('ajuste', 10000); interp.art = gv('art', 100); interp.sil = gv('Sil', 10);
+  if (funcs['loop']) interp.ejecutarCuerpo(funcs['loop'].cuerpo, new Scope(globalScope));
+  return { nombre, notas: interp.notas, eventos: interp.eventos, imagenes: {}, meta: interp.meta, src: interp.nuevo ? src : null };
+}
+
+  // ==================== procesamiento de imagenes (igual algoritmo que la pagina) ====================
+  function cargarYRedimensionar(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const ratioImagen = img.width / img.height, ratioDestino = ANCHO / ALTO;
+        let nw, nh;
+        if (ratioImagen > ratioDestino) { nw = ANCHO; nh = Math.round(ANCHO / ratioImagen); }
+        else { nh = ALTO; nw = Math.round(ALTO * ratioImagen); }
+        const ox = Math.round((ANCHO - nw) / 2), oy = Math.round((ALTO - nh) / 2);
+        const canvas = document.createElement('canvas'); canvas.width = ANCHO; canvas.height = ALTO;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
+        ctx.drawImage(img, ox, oy, nw, nh);
+        resolve(canvas);
+      };
+      img.onerror = () => reject(new Error('no se pudo cargar'));
+      img.src = src;
+    });
+  }
+  function aEscalaGrises(canvas) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < d.data.length; i += 4) {
+      const g = Math.round(0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2]);
+      d.data[i] = d.data[i + 1] = d.data[i + 2] = g;
+    }
+    ctx.putImageData(d, 0, 0); return canvas;
+  }
+  function aMonoUmbral(canvas, umbral) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const w = canvas.width, h = canvas.height, bpf = Math.ceil(w / 8);
+    const bitmap = new Uint8Array(bpf * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const g = d.data[(y * w + x) * 4];
+      if (g > umbral) bitmap[y * bpf + (x >> 3)] |= (1 << (7 - (x & 7)));
+    }
+    return { bitmap, width: w, height: h };
+  }
+  function aMonoDither(canvas, umbral) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const w = canvas.width, h = canvas.height;
+    const gris = new Float32Array(w * h);
+    for (let p = 0; p < w * h; p++) gris[p] = d.data[p * 4];
+    const bpf = Math.ceil(w / 8); const bitmap = new Uint8Array(bpf * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const idx = y * w + x, viejo = gris[idx], nuevo = viejo >= umbral ? 255 : 0, error = viejo - nuevo;
+      if (nuevo === 255) bitmap[y * bpf + (x >> 3)] |= (1 << (7 - (x & 7)));
+      if (x + 1 < w) gris[idx + 1] += error * 7 / 16;
+      if (y + 1 < h) { if (x > 0) gris[idx - 1 + w] += error * 3 / 16; gris[idx + w] += error * 5 / 16; if (x + 1 < w) gris[idx + 1 + w] += error * 1 / 16; }
+    }
+    return { bitmap, width: w, height: h };
+  }
+  function dibujarBitmapEnCanvas(ctx, bitmap, w, h, color) {
+    ctx.fillStyle = color;
+    const bpf = Math.ceil(w / 8);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if ((bitmap[y * bpf + (x >> 3)] >> (7 - (x & 7))) & 1) ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  // ==================== timeline / audio ====================
+  function recalcularTimeline() {
+    inicioMs = [0];
+    for (let i = 0; i < escena.notas.length; i++) inicioMs.push(inicioMs[i] + escena.notas[i][1]);
+    duracionTotalMs = inicioMs[escena.notas.length] || 0;
+    document.getElementById('scrub').max = Math.max(1, duracionTotalMs);
+    document.getElementById('tiempoTotal').textContent = formatoTiempo(duracionTotalMs);
+  }
+  function formatoTiempo(ms) {
+    const s = ms / 1000;
+    const m = Math.floor(s / 60), r = (s - m * 60).toFixed(1);
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+  function notaEnPosicion(ms) {
+    if (escena.notas.length === 0) return null;
+    let lo = 0, hi = escena.notas.length - 1;
+    if (ms >= duracionTotalMs) return escena.notas.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (inicioMs[mid] <= ms) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
+  // primer inicio de nota (de una llamada completa) a partir de un tiempo en ms
+  function notaDeTiempo(ms) {
+    let i = 0; const m = escena.meta || [];
+    while (i < escena.notas.length && inicioMs[i] < ms) i++;
+    while (i > 0 && i < escena.notas.length && m[i] && m[i - 1] && m[i].g === m[i - 1].g && m[i].k === m[i - 1].k && m[i].inv === m[i - 1].inv) i++;
+    return i;
+  }
+  function eventoActivoParaNota(idx) {
+    const ordenados = [...escena.eventos].sort((a, b) => a.nota - b.nota);
+    let activo = null;
+    for (const ev of ordenados) { if (ev.nota <= idx) activo = ev; else break; }
+    if (activo && activo.dur && idx >= notaDeTiempo(inicioMs[activo.nota] + activo.dur)) return null;
+    return activo;
+  }
+
+  function iniciarAudioSiHaceFalta() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      osc = audioCtx.createOscillator(); osc.type = 'square';
+      gainNode = audioCtx.createGain(); gainNode.gain.value = 0;
+      osc.connect(gainNode).connect(audioCtx.destination);
+      osc.start();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  }
+
+  function dibujarEscenaEnCanvas(evento) {
+    const ctx = document.getElementById('pantallaOled').getContext('2d');
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
+    if (!evento) return;
+    if (evento.tipo === 'texto') {
+      ctx.fillStyle = '#7fffe0'; ctx.textBaseline = 'top';
+      (evento.lineas || []).forEach(l => {
+        ctx.font = (9 * l.tam) + 'px monospace';
+        const x = posX(l), y = posY(l);
+        [...txtOled(l.t)].forEach((ch, i) => ctx.fillText(ch, x + i * 6 * l.tam, y));
+      });
+    } else if (evento.tipo === 'imagen') {
+      const img = escena.imagenes[evento.imagen];
+      if (img) dibujarBitmapEnCanvas(ctx, new Uint8Array(img.bitmap), img.width, img.height, '#7fffe0');
+    }
+  }
+
+  function actualizarEnPosicion(ms, conSonido) {
+    const idx = notaEnPosicion(ms);
+    if (idx == null) { if (gainNode) gainNode.gain.value = 0; return; }
+    const [freq] = escena.notas[idx];
+    if (gainNode) {
+      if (conSonido && freq > 0 && (!usarMp3 || modoSonido !== 'mp3')) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }
+      else gainNode.gain.value = 0;
+    }
+    const evento = eventoActivoParaNota(idx);
+    dibujarEscenaEnCanvas(evento);
+    document.getElementById('scrub').value = ms;
+    document.getElementById('tiempoActual').textContent = formatoTiempo(ms);
+    document.getElementById('estadoNota').textContent =
+      'nota ' + (idx + 1) + ' / ' + escena.notas.length + (evento ? '  —  evento activo: ' + (evento.tipo === 'texto' ? (evento.linea1 || evento.linea2 || '(vacío)') : evento.imagen) : '');
+  }
+
+  function loopRAF(timestamp) {
+    if (reproduciendo) {
+      if (usarMp3 && !audioRef.paused) posicionMs = audioRef.currentTime * 1000 - desfase(); else if (ultimoTimestamp != null) posicionMs += (timestamp - ultimoTimestamp);
+      ultimoTimestamp = timestamp;
+      if (posicionMs >= duracionTotalMs) {
+        posicionMs = duracionTotalMs; reproduciendo = false; ultimoTimestamp = null;
+        document.getElementById('btnPlay').textContent = '▶ Reproducir';
+        if (gainNode) gainNode.gain.value = 0;
+      }
+      actualizarEnPosicion(posicionMs, reproduciendo);
+    }
+    requestAnimationFrame(loopRAF);
+  }
+  requestAnimationFrame(loopRAF);
+
+  document.getElementById('btnPlay').addEventListener('click', () => {
+    if (escena.notas.length === 0) return;
+    iniciarAudioSiHaceFalta();
+    if (posicionMs >= duracionTotalMs) posicionMs = 0;
+    reproduciendo = !reproduciendo;
+    ultimoTimestamp = null;
+    sincronizarMp3();
+    document.getElementById('btnPlay').textContent = reproduciendo ? '⏸ Pausar' : '▶ Reproducir';
+    if (!reproduciendo && gainNode) gainNode.gain.value = 0;
+  });
+  document.getElementById('btnStop').addEventListener('click', () => {
+    reproduciendo = false; posicionMs = 0; ultimoTimestamp = null; irMp3(0);
+    document.getElementById('btnPlay').textContent = '▶ Reproducir';
+    if (gainNode) gainNode.gain.value = 0;
+    actualizarEnPosicion(0, false);
+  });
+  document.getElementById('scrub').addEventListener('input', (e) => {
+    reproduciendo = false; ultimoTimestamp = null;
+    document.getElementById('btnPlay').textContent = '▶ Reproducir';
+    posicionMs = parseFloat(e.target.value); irMp3(posicionMs);
+    actualizarEnPosicion(posicionMs, false);
+  });
+
+  // ==================== render de la lista de eventos ====================
+  function renderEventos() {
+    const cont = document.getElementById('listaEventos');
+    cont.innerHTML = '';
+    if (escena.eventos.length === 0) { cont.innerHTML = '<p class="sin-eventos">Todavía no hay eventos.</p>'; return; }
+    const ordenados = [...escena.eventos].sort((a, b) => a.nota - b.nota);
+    ordenados.forEach((ev) => {
+      const div = document.createElement('div'); div.className = 'evento';
+      const idxReal = escena.eventos.indexOf(ev);
+      const t = inicioMs[ev.nota] || 0;
+
+      const cab = document.createElement('div'); cab.className = 'evento-cabecera';
+      const badge = document.createElement('span'); badge.className = 'badge' + (ev.tipo === 'imagen' ? ' imagen' : '');
+      badge.textContent = ev.tipo; cab.appendChild(badge);
+      const tiempo = document.createElement('span'); tiempo.className = 'evento-tiempo';
+      tiempo.textContent = 'nota ' + ev.nota + ' · ' + formatoTiempo(t) + (escena.meta && escena.meta[ev.nota] && escena.meta[ev.nota].g ? ' · ' + escena.meta[ev.nota].g : ''); cab.appendChild(tiempo);
+      const sp = document.createElement('span'); sp.className = 'spacer'; cab.appendChild(sp);
+      const btnBorrar = document.createElement('button'); btnBorrar.className = 'chico peligro'; btnBorrar.textContent = '🗑';
+      btnBorrar.onclick = () => { escena.eventos.splice(idxReal, 1); renderEventos(); actualizarEnPosicion(posicionMs, false); };
+      cab.appendChild(btnBorrar);
+      div.appendChild(cab);
+      const campoNum = (etq, val, cb) => { const inp = el('input', { type: 'number', value: val, step: 0.1, min: 0 }); inp.onchange = () => cb(parseFloat(inp.value) || 0); return el('div', { className: 'campo-mini' }, [el('label', { textContent: etq }), inp]); };
+      div.appendChild(el('div', { className: 'campos-evento' }, [
+        campoNum('Inicio (s)', (t / 1000).toFixed(1), v => { ev.nota = Math.min(notaDeTiempo(v * 1000), escena.notas.length - 1); renderEventos(); actualizarEnPosicion(posicionMs, false); }),
+        campoNum('Dura (s) · 0 = hasta el siguiente', ev.dur ? (ev.dur / 1000).toFixed(1) : 0, v => { ev.dur = v > 0 ? Math.round(v * 1000) : null; actualizarEnPosicion(posicionMs, false); })]));
+
+      const campos = document.createElement('div'); campos.className = 'campos-evento';
+      if (ev.tipo === 'texto') {
+        campos.className = 'campos-evento una-col'; editorTexto(ev, campos);
+      } else {
+        const opciones = Object.keys(escena.imagenes);
+        campos.className = 'campos-evento una-col';
+        campos.appendChild(campoSelect('Imagen', opciones.length ? opciones : ['(sin imágenes en galería)'], ev.imagen || opciones[0] || '', v => { ev.imagen = v; actualizarSiActivo(ev); }));
+      }
+      div.appendChild(campos);
+
+      const acciones = document.createElement('div'); acciones.className = 'acciones-evento';
+      const btnIr = document.createElement('button'); btnIr.className = 'chico secundario'; btnIr.textContent = '▶ Ir acá';
+      btnIr.onclick = () => { reproduciendo = false; ultimoTimestamp = null; document.getElementById('btnPlay').textContent = '▶ Reproducir'; posicionMs = t; irMp3(t); actualizarEnPosicion(t, false); };
+      const btnUsarPos = document.createElement('button'); btnUsarPos.className = 'chico secundario'; btnUsarPos.textContent = '🎯 Usar posición actual';
+      btnUsarPos.onclick = () => { ev.nota = notaEnPosicion(posicionMs) ?? 0; renderEventos(); };
+      acciones.appendChild(btnIr); acciones.appendChild(btnUsarPos);
+      div.appendChild(acciones);
+
+      cont.appendChild(div);
+    });
+  }
+  const ver = (ev) => dibujarEscenaEnCanvas(ev);
+  const el = (tag, props, hijos) => { const e = Object.assign(document.createElement(tag), props || {}); (hijos || []).forEach(h => e.appendChild(h)); return e; };
+  const sel = (pares, actual, cb) => { const x = el('select'); pares.forEach(([v, t]) => x.appendChild(el('option', { value: v, textContent: t, selected: String(v) === String(actual) }))); x.onchange = () => cb(x.value); return x; };
+  function editorTexto(ev, cont) {
+    const caja = el('div'); caja.style.gridColumn = '1 / -1';
+    ev.lineas.forEach(l => {
+      const sx = el('input', { type: 'range', min: 0, max: ANCHO - 1 }), sy = el('input', { type: 'range', min: 0, max: ALTO - 1 });
+      const vx = el('span', { className: 'val' }), vy = el('span', { className: 'val' });
+      const pintar = () => { sx.value = posX(l); vx.textContent = posX(l); sy.value = posY(l); vy.textContent = posY(l); };
+      const sync = () => { pintar(); ver(ev); };
+      const txt = el('input', { type: 'text', value: l.t, placeholder: 'texto (sin tildes ni ñ)' });
+      txt.oninput = () => { l.t = txt.value; sync(); };
+      const tam = sel([[1, 'Tam 1'], [2, 'Tam 2'], [3, 'Tam 3'], [4, 'Tam 4']], l.tam, v => { l.tam = +v; sync(); });
+      const selH = sel([['izq', '◀ Izquierda'], ['centro', '⬌ Centrado'], ['der', 'Derecha ▶'], ['libre', 'Libre']], l.ah, v => { if (v === 'libre') l.x = posX(l); l.ah = v; sync(); });
+      const selV = sel([['arriba', '▲ Arriba'], ['centro', '⬍ Centro'], ['abajo', '▼ Abajo'], ['libre', 'Libre']], l.av, v => { if (v === 'libre') l.y = posY(l); l.av = v; sync(); });
+      sx.oninput = () => { l.x = +sx.value; l.ah = 'libre'; selH.value = 'libre'; sync(); };
+      sy.oninput = () => { l.y = +sy.value; l.av = 'libre'; selV.value = 'libre'; sync(); };
+      const del = el('button', { className: 'chico peligro', textContent: '✕' });
+      del.onclick = () => { ev.lineas.splice(ev.lineas.indexOf(l), 1); renderEventos(); ver(ev); };
+      pintar();
+      caja.appendChild(el('div', { className: 'linea-ed' }, [
+        el('div', { className: 'fila' }, [txt, tam, del]),
+        el('div', { className: 'fila' }, [selH, selV]),
+        el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'X' }), sx, vx]),
+        el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'Y' }), sy, vy])]));
+    });
+    const mas = el('button', { className: 'chico secundario', textContent: '+ línea' });
+    mas.onclick = () => { ev.lineas.push(nuevaLinea('', 2, 'centro', 'abajo')); renderEventos(); };
+    caja.appendChild(el('div', { className: 'acciones-evento' }, [mas]));
+    cont.appendChild(caja);
+    ver(ev);
+  }
+  function actualizarSiActivo(ev) {
+    const idx = notaEnPosicion(posicionMs);
+    const activo = eventoActivoParaNota(idx);
+    if (activo === ev) dibujarEscenaEnCanvas(ev);
+  }
+  function campoMini(etiqueta, tipo, valor, onChange) {
+    const div = document.createElement('div'); div.className = 'campo-mini';
+    const lab = document.createElement('label'); lab.textContent = etiqueta; div.appendChild(lab);
+    const input = document.createElement('input'); input.type = tipo; input.value = valor;
+    input.addEventListener('input', () => onChange(input.value));
+    div.appendChild(input); return div;
+  }
+  function campoSelect(etiqueta, opciones, valor, onChange) {
+    const div = document.createElement('div'); div.className = 'campo-mini';
+    const lab = document.createElement('label'); lab.textContent = etiqueta; div.appendChild(lab);
+    const sel = document.createElement('select');
+    opciones.forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; if (o === valor) opt.selected = true; sel.appendChild(opt); });
+    sel.addEventListener('change', () => onChange(sel.value));
+    div.appendChild(sel); return div;
+  }
+
+  document.getElementById('btnAgregarTexto').addEventListener('click', () => {
+    const idx = notaEnPosicion(posicionMs) ?? 0;
+    const nuevo = { nota: idx, tipo: 'texto', lineas: [nuevaLinea('texto', 2, 'centro', 'centro')] }; escena.eventos.push(nuevo); setTimeout(() => ver(nuevo), 0);
+    renderEventos(); actualizarEnPosicion(posicionMs, false);
+  });
+  document.getElementById('btnAgregarImagen').addEventListener('click', () => {
+    const idx = notaEnPosicion(posicionMs) ?? 0;
+    const primera = Object.keys(escena.imagenes)[0];
+    if (!primera) { document.getElementById('fileImgEvento').click(); return; }
+    escena.eventos.push({ nota: idx, tipo: 'imagen', imagen: primera });
+    renderEventos(); actualizarEnPosicion(posicionMs, false);
+  });
+
+  function subirImagenEvento(file) {
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = async (e) => {
+      const cv = await cargarYRedimensionar(e.target.result);
+      const umbral = parseInt(document.getElementById('umbralMini').value, 10);
+      const gris = aEscalaGrises(cv);
+      const r = document.getElementById('chkDitheringMini').checked ? aMonoDither(gris, umbral) : aMonoUmbral(gris, umbral);
+      let nombre = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_') || 'imagen';
+      if (/^[0-9]/.test(nombre)) nombre = '_' + nombre;
+      while (escena.imagenes[nombre]) nombre += '_';
+      escena.imagenes[nombre] = { bitmap: Array.from(r.bitmap), width: r.width, height: r.height };
+      const ev = { nota: notaEnPosicion(posicionMs) ?? 0, tipo: 'imagen', imagen: nombre };
+      escena.eventos.push(ev); renderGaleria(); renderEventos(); ver(ev);
+    };
+    rd.readAsDataURL(file);
+  }
+  document.getElementById('btnSubirImagenAca').onclick = () => document.getElementById('fileImgEvento').click();
+  document.getElementById('fileImgEvento').onchange = (e) => { subirImagenEvento(e.target.files[0]); e.target.value = ''; };
+
+  // ==================== galeria de imagenes ====================
+  let canvasTmpProcesado = null;
+  function renderGaleria() {
+    const cont = document.getElementById('galeriaImagenes');
+    const nombres = Object.keys(escena.imagenes);
+    cont.innerHTML = '';
+    if (nombres.length === 0) { cont.innerHTML = '<p class="sin-imagenes">Sin imágenes todavía.</p>'; return; }
+    nombres.forEach(nombre => {
+      const img = escena.imagenes[nombre];
+      const item = document.createElement('div'); item.className = 'item-galeria';
+      const canvas = document.createElement('canvas'); canvas.width = ANCHO; canvas.height = ALTO;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
+      dibujarBitmapEnCanvas(ctx, new Uint8Array(img.bitmap), img.width, img.height, '#7fffe0');
+      item.appendChild(canvas);
+      const nom = document.createElement('div'); nom.className = 'nombre-item'; nom.textContent = nombre; item.appendChild(nom);
+      const btn = document.createElement('button'); btn.className = 'borrar-item'; btn.textContent = 'Eliminar';
+      btn.onclick = () => { delete escena.imagenes[nombre]; renderGaleria(); renderEventos(); };
+      item.appendChild(btn);
+      cont.appendChild(item);
+    });
+  }
+
+  async function procesarImagenTmp(dataUrl) {
+    canvasTmpProcesado = await cargarYRedimensionar(dataUrl);
+    reprocesarPreviewTmp();
+  }
+  function reprocesarPreviewTmp() {
+    if (!canvasTmpProcesado) return;
+    const copia = document.createElement('canvas'); copia.width = ANCHO; copia.height = ALTO;
+    copia.getContext('2d').drawImage(canvasTmpProcesado, 0, 0);
+    const gris = aEscalaGrises(copia);
+    const umbral = parseInt(document.getElementById('umbralMini').value, 10);
+    const dithering = document.getElementById('chkDitheringMini').checked;
+    const resultado = dithering ? aMonoDither(gris, umbral) : aMonoUmbral(gris, umbral);
+    window._ultimoBitmapTmp = resultado;
+    const ctxPrev = document.getElementById('previewImgTmp').getContext('2d');
+    ctxPrev.fillStyle = '#000'; ctxPrev.fillRect(0, 0, ANCHO, ALTO);
+    dibujarBitmapEnCanvas(ctxPrev, resultado.bitmap, resultado.width, resultado.height, '#7fffe0');
+    document.getElementById('btnAgregarGaleria').disabled = false;
+  }
+  document.getElementById('umbralMini').addEventListener('input', (e) => {
+    document.getElementById('valorUmbralMini').textContent = e.target.value; reprocesarPreviewTmp();
+  });
+  document.getElementById('chkDitheringMini').addEventListener('change', reprocesarPreviewTmp);
+  document.getElementById('zonaCargaImg').addEventListener('click', () => document.getElementById('fileImg').click());
+  document.getElementById('fileImg').addEventListener('change', (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      procesarImagenTmp(ev.target.result);
+      if (!document.getElementById('nombreImgTmp').value) {
+        document.getElementById('nombreImgTmp').value = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_');
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+  ['dragenter', 'dragover'].forEach(ev => document.getElementById('zonaCargaImg').addEventListener(ev, (e) => { e.preventDefault(); e.currentTarget.classList.add('sobre'); }));
+  ['dragleave', 'drop'].forEach(ev => document.getElementById('zonaCargaImg').addEventListener(ev, (e) => { e.preventDefault(); e.currentTarget.classList.remove('sobre'); }));
+  document.getElementById('zonaCargaImg').addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => procesarImagenTmp(ev.target.result);
+    reader.readAsDataURL(file);
+  });
+  document.getElementById('btnAgregarGaleria').addEventListener('click', () => {
+    if (!window._ultimoBitmapTmp) return;
+    let nombre = document.getElementById('nombreImgTmp').value.trim().replace(/[^a-zA-Z0-9_]/g, '_') || 'imagen';
+    if (/^[0-9]/.test(nombre)) nombre = '_' + nombre;
+    escena.imagenes[nombre] = { bitmap: Array.from(window._ultimoBitmapTmp.bitmap), width: window._ultimoBitmapTmp.width, height: window._ultimoBitmapTmp.height };
+    document.getElementById('nombreImgTmp').value = '';
+    renderGaleria(); renderEventos();
+  });
+
+  // ==================== tabs ====================
+  document.getElementById('tabEventosBtn').addEventListener('click', () => {
+    document.getElementById('tabEventosBtn').classList.add('activo');
+    document.getElementById('tabImagenesBtn').classList.remove('activo');
+    document.getElementById('panelEventos').style.display = 'block';
+    document.getElementById('panelImagenes').style.display = 'none';
+  });
+  document.getElementById('tabImagenesBtn').addEventListener('click', () => {
+    document.getElementById('tabImagenesBtn').classList.add('activo');
+    document.getElementById('tabEventosBtn').classList.remove('activo');
+    document.getElementById('panelImagenes').style.display = 'block';
+    document.getElementById('panelEventos').style.display = 'none';
+  });
+
+  // ==================== importar .ino ====================
+  document.getElementById('btnImportarIno').addEventListener('click', () => document.getElementById('modalIno').classList.add('abierto'));
+  document.getElementById('btnCancelarImportar').addEventListener('click', () => document.getElementById('modalIno').classList.remove('abierto'));
+  document.getElementById('btnElegirArchivoIno').addEventListener('click', () => document.getElementById('fileIno').click());
+  document.getElementById('fileIno').addEventListener('change', (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => { document.getElementById('pegarIno').value = ev.target.result; };
+    reader.readAsText(file);
+  });
+  document.getElementById('btnConfirmarImportar').addEventListener('click', () => {
+    const src = document.getElementById('pegarIno').value;
+    const aviso = document.getElementById('avisoImportar');
+    try {
+      const nombre = document.getElementById('inputNombreCancion').value || 'cancion';
+      const nueva = convertirInoAEscena(src, nombre);
+      if (nueva.notas.length === 0) throw new Error('No se encontraron notas — ¿es el .ino correcto?');
+      const modoParche = document.getElementById('chkModoParche').checked;
+      if (!modoParche) { nueva.eventos = []; nueva.meta = []; nueva.src = null; }
+      escena = nueva; escena.imagenes = escena.imagenes || {};
+      recalcularTimeline(); renderEventos(); renderGaleria();
+      posicionMs = 0; actualizarEnPosicion(0, false);
+      guardarProyectoActual();
+      aviso.innerHTML = '<div class="aviso ok">Importado: ' + escena.notas.length + ' notas' + (modoParche ? (', ' + escena.eventos.length + ' eventos de texto (modo parche).') : ' — pantalla en blanco, lista para agregar texto.') + '</div>';
+      setTimeout(() => { document.getElementById('modalIno').classList.remove('abierto'); aviso.innerHTML = ''; }, 1200);
+    } catch (err) {
+      aviso.innerHTML = '<div class="aviso error">Error al importar: ' + err.message + '</div>';
+    }
+  });
+
+  // ==================== guardar / cargar JSON ====================
+  document.getElementById('btnGuardarJson').addEventListener('click', () => {
+    escena.nombre = document.getElementById('inputNombreCancion').value || 'cancion';
+    const blob = new Blob([JSON.stringify(escena, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = escena.nombre + '.json'; a.click();
+    URL.revokeObjectURL(url);
+  });
+  document.getElementById('btnCargarJson').addEventListener('click', () => document.getElementById('fileJson').click());
+  document.getElementById('fileJson').addEventListener('change', (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), imagenes: data.imagenes || {}, meta: data.meta || [], src: data.src || null };
+        document.getElementById('inputNombreCancion').value = escena.nombre;
+        recalcularTimeline(); renderEventos(); renderGaleria();
+        posicionMs = 0; actualizarEnPosicion(0, false);
+      } catch (err) { alert('JSON inválido: ' + err.message); }
+    };
+    reader.readAsText(file);
+  });
+
+  // ==================== exportar .ino ====================
+  function bytesAProgmem(bitmap, nombre) {
+    const filas = [];
+    for (let i = 0; i < bitmap.length; i += 16) {
+      filas.push('  ' + Array.from(bitmap.slice(i, i + 16)).map(b => '0x' + b.toString(16).toUpperCase().padStart(2, '0')).join(', ') + ',');
+    }
+    return `static const uint8_t PROGMEM ${nombre}[] = {\n${filas.join('\n')}\n};\n`;
+  }
+
+  const HELPERS = `void borra(){ display.clearDisplay(); }
+
+void linea(int tam, int x, int y, const char* t){
+  display.setTextSize(tam);
+  display.setTextColor(WHITE);
+  display.setCursor(x, y);
+  display.println(t);
+}
+
+void muestra(){ display.display(); }
+
+`;
+  function conFines(ord) {
+    const out = [...ord];
+    ord.forEach((ev, i) => {
+      if (!ev.dur) return;
+      const fin = notaDeTiempo(inicioMs[ev.nota] + ev.dur), sig = ord[i + 1];
+      if (fin >= escena.notas.length || (sig && sig.nota <= fin)) return;
+      out.push({ nota: fin, tipo: 'fin' });
+    });
+    return out.sort((a, b) => a.nota - b.nota);
+  }
+  function codigoEvento(ev) {
+    if (ev.tipo === 'fin') return '  borra();\n  muestra();\n';
+    if (ev.tipo === 'imagen') return `  borra();\n  display.drawBitmap(0, 0, ${ev.imagen}, ${ANCHO}, ${ALTO}, WHITE);\n  muestra();\n`;
+    let c = '  borra();\n';
+    ev.lineas.forEach(l => { if (l.t) c += `  linea(${l.tam}, ${posX(l)}, ${posY(l)}, ${JSON.stringify(txtOled(l.t))});\n`; });
+    return c + '  muestra();\n';
+  }
+  function imagenesUsadas(ordenados, yaEn) {
+    let b = '';
+    new Set(ordenados.filter(e => e.tipo === 'imagen' && e.imagen).map(e => e.imagen)).forEach(n => {
+      const img = escena.imagenes[n];
+      if (img && !new RegExp('PROGMEM\\s*' + n + '\\b|' + n + '\\s*\\[\\]\\s*PROGMEM').test(yaEn)) b += bytesAProgmem(new Uint8Array(img.bitmap), n) + '\n';
+    });
+    return b;
+  }
+  // Estructura nueva: se conserva TU .ino y solo se reescriben las llamadas de pantalla dentro de cada compXX()
+  function parchearIno(src, ordenados) {
+    const funcs = encontrarFunciones(src), meta = escena.meta || [], porG = {}; let omitidos = 0;
+    ordenados.forEach(ev => {
+      const m = meta[ev.nota];
+      if (!m || m.g == null || m.inv > 0) { omitidos++; return; }
+      const g = porG[m.g] = porG[m.g] || {};
+      (g[m.k] = g[m.k] || []).push(ev);
+    });
+    let out = src;
+    [...new Set(meta.filter(m => m.g != null).map(m => m.g))].forEach(g => {
+      if (!funcs[g]) return;
+      let k = 0; const nuevas = [];
+      funcs[g].cuerpo.split('\n').forEach(l => {
+        if (/^\s*(letra|agrega|borra|linea|muestra)\s*\(/.test(l)) return;
+        if (/^\s*notaL?\s*\(/.test(l)) { ((porG[g] || {})[k] || []).forEach(ev => nuevas.push(codigoEvento(ev).replace(/\n$/, ''))); k++; }
+        nuevas.push(l);
+      });
+      out = out.replace(funcs[g].cuerpo, () => nuevas.join('\n'));
+    });
+    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS);
+    if (extra) out = out.replace(/void\s+setup\s*\(/, m => extra + m);
+    if (omitidos) alert(omitidos + ' evento(s) no se pudieron ubicar dentro de una función (¿función repetida en loop?) y quedaron fuera.');
+    return out;
+  }
+  function descargar(nombre, texto) {
+    const url = URL.createObjectURL(new Blob([texto], { type: 'text/plain' }));
+    const a = document.createElement('a'); a.href = url; a.download = nombre; a.click(); URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('btnExportarIno').addEventListener('click', () => {
+    if (escena.notas.length === 0) { alert('No hay ninguna canción cargada.'); return; }
+    const nombreCancion = (document.getElementById('inputNombreCancion').value || 'cancion').replace(/[^a-zA-Z0-9_]/g, '_');
+    const ordenados = conFines([...escena.eventos].sort((a, b) => a.nota - b.nota));
+    if (escena.src) { descargar(nombreCancion + '.ino', parchearIno(escena.src, ordenados)); return; }
+
+    // .ino viejo (LCD): se genera un archivo nuevo plano
+    let cuerpo = '', ep = 0;
+    for (let i = 0; i < escena.notas.length; i++) {
+      while (ep < ordenados.length && ordenados[ep].nota === i) { cuerpo += codigoEvento(ordenados[ep]) + '\n'; ep++; }
+      cuerpo += `  paso(${escena.notas[i][0]}, ${escena.notas[i][1]});\n`;
+    }
+    descargar(nombreCancion + '.ino', `// "${nombreCancion}" -- generado con el simulador de canciones OLED
+// ESP8266 + SSD1306 128x64 (I2C)
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define ANCHO 128
+#define ALTO  64
+
+Adafruit_SSD1306 display(ANCHO, ALTO, &Wire, -1);
+
+const int pinBuzzer = 4; // GPIO4 / D2
+
+${imagenesUsadas(ordenados, '')}${HELPERS}// Un paso: tono (o silencio si freq==0) durante "dur" ms.
+void paso(int freq, int dur) {
+  if (freq > 0) tone(pinBuzzer, freq, dur);
+  else noTone(pinBuzzer);
+  delay(dur);
+  noTone(pinBuzzer);
+}
+
+void setup() {
+  Wire.begin(14, 12); // SDA=14 (D5), SCL=12 (D6)
+  delay(300);
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  display.clearDisplay();
+  display.display();
+}
+
+void loop() {
+${cuerpo}  delay(1900);
+}
+`);
+  });
+
+  // ---- menú avanzado y mp3 ----
+  document.getElementById('chkAvanzado').onchange = (e) => document.body.classList.toggle('avanzado', e.target.checked);
+  document.getElementById('selSonido').onchange = (e) => { modoSonido = e.target.value; audioRef.muted = modoSonido === 'tono'; };
+  document.getElementById('btnMp3').onclick = () => document.getElementById('fileMp3').click();
+  document.getElementById('fileMp3').onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    audioRef.src = URL.createObjectURL(f); usarMp3 = true; document.getElementById('estadoMp3').textContent = f.name;
+  };
+
+  // ==================== init ====================
+  recalcularTimeline();
+  actualizarEnPosicion(0, false);
+})();
+</script>
+</body>
+</html>
