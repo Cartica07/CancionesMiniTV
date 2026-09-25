@@ -1354,6 +1354,14 @@ void loop() {
   };
 
   // ==================== init ====================
+  // Al abrir la página se retoma el último proyecto activo (o el primero que exista);
+  // antes esto no pasaba y por eso al recargar parecía que el proyecto se borraba.
+  (function cargarAlAbrir() {
+    const todos = cargarProyectos();
+    const ultimo = localStorage.getItem(CLAVE_ACTUAL);
+    const nombre = (ultimo && todos[ultimo]) ? ultimo : (Object.keys(todos)[0] || 'Proyecto 1');
+    activarProyecto(nombre, true);
+  })();
   recalcularTimeline();
   actualizarEnPosicion(0, false);
 })();
