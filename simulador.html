@@ -120,6 +120,7 @@
   .linea-ed .rot { font-size:.66rem; color:var(--ink-dim); width:14px; }
   .linea-ed .val { font-size:.74rem; width:28px; text-align:right; font-variant-numeric:tabular-nums; color:var(--accent); }
   .linea-ed .solo-adv { display:none; } body.avanzado .linea-ed .solo-adv { display:flex; }
+  button:disabled { opacity:.4; cursor:default; }
   .chk-adv { font-size:.78rem; display:flex; align-items:center; gap:6px; cursor:pointer; }
   .fila-mp3 { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; font-size:.72rem; color:var(--ink-dim); }
   .fila-mp3 select { background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:4px 6px; border-radius:5px; font-size:.72rem; }
@@ -139,6 +140,8 @@
     <button class="secundario" id="btnImportarIno">Importar .ino</button>
     <button class="secundario" id="btnCargarJson">Cargar JSON</button>
     <button class="secundario" id="btnGuardarJson">Guardar JSON</button>
+    <button class="chico secundario" id="btnDeshacer" title="Ctrl+Z">↶ Deshacer</button>
+    <button class="chico secundario" id="btnRehacer" title="Ctrl+Y">↷ Rehacer</button>
     <label class="chk-adv"><input type="checkbox" id="chkAvanzado"> Menú avanzado (X/Y por píxel)</label>
     <span class="spacer"></span>
     <button id="btnExportarIno">Exportar .ino</button>
@@ -735,6 +738,22 @@ function convertirInoAEscena(src, nombre) {
     while (i > 0 && i < escena.notas.length && m[i] && m[i - 1] && m[i].g === m[i - 1].g && m[i].k === m[i - 1].k && m[i].inv === m[i - 1].inv) i++;
     return i;
   }
+  // Inicio de un evento: en ms exactos (libre). Solo en modo parche queda pegado a una nota.
+  const tIni = (ev) => (!escena.src && ev.ms != null) ? ev.ms : (inicioMs[ev.nota] || 0);
+  function fijarInicio(ev, ms) {
+    if (escena.src) { ev.nota = Math.min(notaDeTiempo(ms), escena.notas.length - 1); delete ev.ms; }
+    else { ev.ms = Math.max(0, Math.round(ms)); ev.nota = notaEnPosicion(ev.ms) ?? 0; }
+  }
+  function eventoActivoEn(ms) {
+    const ord = [...escena.eventos].sort((a, b) => tIni(a) - tIni(b));
+    let activo = null;
+    for (const ev of ord) { if (tIni(ev) <= ms) activo = ev; else break; }
+    if (activo && activo.dur) {
+      const fin = escena.src ? (inicioMs[notaDeTiempo(tIni(activo) + activo.dur)] ?? Infinity) : tIni(activo) + activo.dur;
+      if (ms >= fin) return null;
+    }
+    return activo;
+  }
   function eventoActivoParaNota(idx) {
     const ordenados = [...escena.eventos].sort((a, b) => a.nota - b.nota);
     let activo = null;
@@ -779,12 +798,12 @@ function convertirInoAEscena(src, nombre) {
       if (conSonido && freq > 0 && (!usarMp3 || modoSonido !== 'mp3')) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }
       else gainNode.gain.value = 0;
     }
-    const evento = eventoActivoParaNota(idx);
+    const evento = eventoActivoEn(ms);
     dibujarEscenaEnCanvas(evento);
     document.getElementById('scrub').value = ms;
     document.getElementById('tiempoActual').textContent = formatoTiempo(ms);
     document.getElementById('estadoNota').textContent =
-      'nota ' + (idx + 1) + ' / ' + escena.notas.length + (evento ? '  —  evento activo: ' + (evento.tipo === 'texto' ? (evento.linea1 || evento.linea2 || '(vacío)') : evento.imagen) : '');
+      'nota ' + (idx + 1) + ' / ' + escena.notas.length + (evento ? '  —  evento activo: ' + (evento.tipo === 'texto' ? ((evento.lineas || []).map(l => l.t).filter(Boolean).join(' / ') || '(vacío)') : evento.imagen) : '');
   }
 
   function loopRAF(timestamp) {
@@ -830,11 +849,11 @@ function convertirInoAEscena(src, nombre) {
     const cont = document.getElementById('listaEventos');
     cont.innerHTML = '';
     if (escena.eventos.length === 0) { cont.innerHTML = '<p class="sin-eventos">Todavía no hay eventos.</p>'; return; }
-    const ordenados = [...escena.eventos].sort((a, b) => a.nota - b.nota);
+    const ordenados = [...escena.eventos].sort((a, b) => tIni(a) - tIni(b));
     ordenados.forEach((ev) => {
       const div = document.createElement('div'); div.className = 'evento';
       const idxReal = escena.eventos.indexOf(ev);
-      const t = inicioMs[ev.nota] || 0;
+      const t = tIni(ev);
 
       const cab = document.createElement('div'); cab.className = 'evento-cabecera';
       const badge = document.createElement('span'); badge.className = 'badge' + (ev.tipo === 'imagen' ? ' imagen' : '');
@@ -846,10 +865,10 @@ function convertirInoAEscena(src, nombre) {
       btnBorrar.onclick = () => { escena.eventos.splice(idxReal, 1); renderEventos(); actualizarEnPosicion(posicionMs, false); };
       cab.appendChild(btnBorrar);
       div.appendChild(cab);
-      const campoNum = (etq, val, cb) => { const inp = el('input', { type: 'number', value: val, step: 0.1, min: 0 }); inp.onchange = () => cb(parseFloat(inp.value) || 0); return el('div', { className: 'campo-mini' }, [el('label', { textContent: etq }), inp]); };
+      const campoNum = (etq, val, cb) => { const inp = el('input', { type: 'number', value: val, step: 0.01, min: 0 }); inp.onchange = () => cb(parseFloat(inp.value) || 0); return el('div', { className: 'campo-mini' }, [el('label', { textContent: etq }), inp]); };
       div.appendChild(el('div', { className: 'campos-evento' }, [
-        campoNum('Inicio (s)', (t / 1000).toFixed(1), v => { ev.nota = Math.min(notaDeTiempo(v * 1000), escena.notas.length - 1); renderEventos(); actualizarEnPosicion(posicionMs, false); }),
-        campoNum('Dura (s) · 0 = hasta el siguiente', ev.dur ? (ev.dur / 1000).toFixed(1) : 0, v => { ev.dur = v > 0 ? Math.round(v * 1000) : null; actualizarEnPosicion(posicionMs, false); })]));
+        campoNum('Inicio (s)', (t / 1000).toFixed(2), v => { fijarInicio(ev, v * 1000); renderEventos(); actualizarEnPosicion(posicionMs, false); }),
+        campoNum('Dura (s) · 0 = hasta el siguiente', ev.dur ? (ev.dur / 1000).toFixed(2) : 0, v => { ev.dur = v > 0 ? Math.round(v * 1000) : null; actualizarEnPosicion(posicionMs, false); })]));
 
       const campos = document.createElement('div'); campos.className = 'campos-evento';
       if (ev.tipo === 'texto') {
@@ -865,7 +884,7 @@ function convertirInoAEscena(src, nombre) {
       const btnIr = document.createElement('button'); btnIr.className = 'chico secundario'; btnIr.textContent = '▶ Ir acá';
       btnIr.onclick = () => { reproduciendo = false; ultimoTimestamp = null; document.getElementById('btnPlay').textContent = '▶ Reproducir'; posicionMs = t; irMp3(t); actualizarEnPosicion(t, false); };
       const btnUsarPos = document.createElement('button'); btnUsarPos.className = 'chico secundario'; btnUsarPos.textContent = '🎯 Usar posición actual';
-      btnUsarPos.onclick = () => { ev.nota = notaEnPosicion(posicionMs) ?? 0; renderEventos(); };
+      btnUsarPos.onclick = () => { fijarInicio(ev, posicionMs); renderEventos(); };
       acciones.appendChild(btnIr); acciones.appendChild(btnUsarPos);
       div.appendChild(acciones);
 
@@ -905,8 +924,7 @@ function convertirInoAEscena(src, nombre) {
     ver(ev);
   }
   function actualizarSiActivo(ev) {
-    const idx = notaEnPosicion(posicionMs);
-    const activo = eventoActivoParaNota(idx);
+    const activo = eventoActivoEn(posicionMs);
     if (activo === ev) dibujarEscenaEnCanvas(ev);
   }
   function campoMini(etiqueta, tipo, valor, onChange) {
@@ -927,14 +945,14 @@ function convertirInoAEscena(src, nombre) {
 
   document.getElementById('btnAgregarTexto').addEventListener('click', () => {
     const idx = notaEnPosicion(posicionMs) ?? 0;
-    const nuevo = { nota: idx, tipo: 'texto', lineas: [nuevaLinea('texto', 2, 'centro', 'centro')] }; escena.eventos.push(nuevo); setTimeout(() => ver(nuevo), 0);
+    const nuevo = { nota: idx, ms: Math.round(posicionMs), tipo: 'texto', lineas: [nuevaLinea('texto', 2, 'centro', 'centro')] }; escena.eventos.push(nuevo); setTimeout(() => ver(nuevo), 0);
     renderEventos(); actualizarEnPosicion(posicionMs, false);
   });
   document.getElementById('btnAgregarImagen').addEventListener('click', () => {
     const idx = notaEnPosicion(posicionMs) ?? 0;
     const primera = Object.keys(escena.imagenes)[0];
     if (!primera) { document.getElementById('fileImgEvento').click(); return; }
-    escena.eventos.push({ nota: idx, tipo: 'imagen', imagen: primera });
+    escena.eventos.push({ nota: idx, ms: Math.round(posicionMs), tipo: 'imagen', imagen: primera });
     renderEventos(); actualizarEnPosicion(posicionMs, false);
   });
 
@@ -950,7 +968,7 @@ function convertirInoAEscena(src, nombre) {
       if (/^[0-9]/.test(nombre)) nombre = '_' + nombre;
       while (escena.imagenes[nombre]) nombre += '_';
       escena.imagenes[nombre] = { bitmap: Array.from(r.bitmap), width: r.width, height: r.height };
-      const ev = { nota: notaEnPosicion(posicionMs) ?? 0, tipo: 'imagen', imagen: nombre };
+      const ev = { nota: notaEnPosicion(posicionMs) ?? 0, ms: Math.round(posicionMs), tipo: 'imagen', imagen: nombre };
       escena.eventos.push(ev); renderGaleria(); renderEventos(); ver(ev);
     };
     rd.readAsDataURL(file);
@@ -1181,12 +1199,23 @@ void muestra(){ display.display(); }
     const ordenados = conFines([...escena.eventos].sort((a, b) => a.nota - b.nota));
     if (escena.src) { descargar(nombreCancion + '.ino', parchearIno(escena.src, ordenados)); return; }
 
-    // .ino viejo (LCD): se genera un archivo nuevo plano
-    let cuerpo = '', ep = 0;
-    for (let i = 0; i < escena.notas.length; i++) {
-      while (ep < ordenados.length && ordenados[ep].nota === i) { cuerpo += codigoEvento(ordenados[ep]) + '\n'; ep++; }
-      cuerpo += `  paso(${escena.notas[i][0]}, ${escena.notas[i][1]});\n`;
-    }
+    // Sin estructura original: archivo nuevo. La pantalla sale en el milisegundo exacto, sin depender de las notas.
+    const ord0 = [...escena.eventos].sort((a, b) => tIni(a) - tIni(b)), esc = [];
+    ord0.forEach((ev, i) => {
+      const t0 = Math.round(tIni(ev)); esc.push({ t: t0, ev });
+      if (ev.dur) { const tf = t0 + ev.dur, sig = ord0[i + 1]; if (!(sig && Math.round(tIni(sig)) <= tf)) esc.push({ t: tf, ev: null }); }
+    });
+    esc.sort((a, b) => a.t - b.t);
+    const lin = (ev) => ev.lineas.filter(l => l.t);
+    const maxL = Math.max(1, ...esc.map(x => x.ev && x.ev.tipo === 'texto' ? lin(x.ev).length : 0));
+    const filasEsc = esc.map(({ t, ev }) => {
+      if (!ev) return `  { ${t}, NULL, 0, {} },`;
+      if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, 0, {} },`;
+      const ls = lin(ev);
+      return `  { ${t}, NULL, ${ls.length}, { ${ls.map(l => `{${l.tam}, ${posX(l)}, ${posY(l)}, ${JSON.stringify(txtOled(l.t))}}`).join(', ')} } },`;
+    }).join('\n');
+    const filasNotas = [];
+    for (let i = 0; i < escena.notas.length; i += 8) filasNotas.push('  ' + escena.notas.slice(i, i + 8).map(n => `{${n[0]}, ${n[1]}}`).join(', ') + ',');
     descargar(nombreCancion + '.ino', `// "${nombreCancion}" -- generado con el simulador de canciones OLED
 // ESP8266 + SSD1306 128x64 (I2C)
 
@@ -1201,15 +1230,56 @@ Adafruit_SSD1306 display(ANCHO, ALTO, &Wire, -1);
 
 const int pinBuzzer = 4; // GPIO4 / D2
 
-${imagenesUsadas(ordenados, '')}${HELPERS}// Un paso: tono (o silencio si freq==0) durante "dur" ms.
+${imagenesUsadas(ord0, '')}// ===== Melodia: {frecuencia Hz (0 = silencio), duracion ms} =====
+const int melodia[][2] = {
+${filasNotas.join('\n')}
+};
+const int N_NOTAS = sizeof(melodia) / sizeof(melodia[0]);
+
+// ===== Pantalla: cada escena sale en el ms indicado (t), contado desde el inicio de la melodia =====
+// { t_ms, imagen o NULL, cantidad de renglones, { {tam, x, y, "texto"}, ... } }   (0 renglones = pantalla en blanco)
+#define MAXL ${maxL}
+struct Linea  { byte tam; byte x; byte y; const char* txt; };
+struct Escena { unsigned long t; const uint8_t* img; byte n; Linea l[MAXL]; };
+
+const Escena escenas[] = {
+${filasEsc}
+  { 0xFFFFFFFF, NULL, 0, {} }   // fin de la lista
+};
+
+unsigned long t0, tFin;   // t0 = inicio de la melodia, tFin = instante en que termina la nota actual
+int iEsc = 0;
+
+void dibujaEscena(const Escena& e) {
+  display.clearDisplay();
+  if (e.img) display.drawBitmap(0, 0, e.img, ANCHO, ALTO, WHITE);
+  for (int i = 0; i < e.n; i++) {
+    display.setTextSize(e.l[i].tam);
+    display.setTextColor(WHITE);
+    display.setCursor(e.l[i].x, e.l[i].y);
+    display.println(e.l[i].txt);
+  }
+  display.display();
+}
+
+void revisaPantalla() {
+  while (escenas[iEsc].t != 0xFFFFFFFF && millis() - t0 >= escenas[iEsc].t) dibujaEscena(escenas[iEsc++]);
+}
+
+// Espera hasta el instante t (ms) sin dejar de atender la pantalla
+void esperaHasta(unsigned long t) {
+  while ((long)(t - millis()) > 0) { revisaPantalla(); delay(1); }
+}
+
+// Un paso: tono (o silencio si freq==0) durante "dur" ms, con reloj propio: no se acumula atraso
 void paso(int freq, int dur) {
-  if (freq > 0) tone(pinBuzzer, freq, dur);
-  else noTone(pinBuzzer);
-  delay(dur);
-  noTone(pinBuzzer);
+  if (freq > 0) tone(pinBuzzer, freq); else noTone(pinBuzzer);
+  tFin += dur;
+  esperaHasta(tFin);
 }
 
 void setup() {
+  pinMode(pinBuzzer, OUTPUT);
   Wire.begin(14, 12); // SDA=14 (D5), SCL=12 (D6)
   delay(300);
   display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
@@ -1218,10 +1288,61 @@ void setup() {
 }
 
 void loop() {
-${cuerpo}  delay(1900);
+  iEsc = 0;
+  display.clearDisplay();
+  display.display();
+  t0 = tFin = millis();
+  for (int i = 0; i < N_NOTAS; i++) paso(melodia[i][0], melodia[i][1]);
+  noTone(pinBuzzer);
+  esperaHasta(tFin + 1900);
 }
 `);
+  return;
   });
+
+  // ---- deshacer / rehacer: últimos 5 movimientos ----
+  // Cada cambio (texto, tamaño, posición, inicio, duración, agregar o borrar evento o imagen) se guarda solo,
+  // agrupando lo que se hace seguido (escribir, arrastrar un slider) como un único movimiento.
+  const hist = { pila: [], pos: -1 };
+  let escenaRef = escena, firmaVista = '', firmaEstable = '';
+  const foto = () => JSON.stringify({ e: escena.eventos, i: escena.imagenes });
+  const firma = () => JSON.stringify(escena.eventos) + Object.keys(escena.imagenes).join(',');
+  function botonesHist() {
+    const u = document.getElementById('btnDeshacer'), r = document.getElementById('btnRehacer');
+    u.disabled = hist.pos <= 0; r.disabled = hist.pos >= hist.pila.length - 1;
+    u.textContent = '↶ Deshacer' + (hist.pos > 0 ? ' (' + hist.pos + ')' : '');
+    r.textContent = '↷ Rehacer' + (hist.pos < hist.pila.length - 1 ? ' (' + (hist.pila.length - 1 - hist.pos) + ')' : '');
+  }
+  function reiniciarHist() { escenaRef = escena; hist.pila = [foto()]; hist.pos = 0; firmaVista = firmaEstable = firma(); botonesHist(); }
+  function guardarCambio() {
+    const f = firma(); if (f === firmaEstable) return;
+    hist.pila = hist.pila.slice(0, hist.pos + 1); hist.pila.push(foto());
+    if (hist.pila.length > 6) hist.pila.shift();
+    hist.pos = hist.pila.length - 1; firmaEstable = firmaVista = f; botonesHist();
+  }
+  function irHist(i) {
+    guardarCambio();
+    if (i < 0 || i >= hist.pila.length) return;
+    const d = JSON.parse(hist.pila[i]);
+    escena.eventos = d.e.map(migrar); escena.imagenes = d.i; hist.pos = i;
+    firmaVista = firmaEstable = firma();
+    renderEventos(); renderGaleria(); actualizarEnPosicion(posicionMs, false); botonesHist();
+  }
+  setInterval(() => {
+    if (escena !== escenaRef) { reiniciarHist(); return; }
+    const f = firma();
+    if (f !== firmaEstable && f === firmaVista) guardarCambio();
+    firmaVista = f;
+  }, 400);
+  document.getElementById('btnDeshacer').onclick = () => irHist(hist.pos - 1);
+  document.getElementById('btnRehacer').onclick = () => irHist(hist.pos + 1);
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); irHist(hist.pos - 1); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); irHist(hist.pos + 1); }
+  });
+  reiniciarHist();
 
   // ---- menú avanzado y mp3 ----
   document.getElementById('chkAvanzado').onchange = (e) => document.body.classList.toggle('avanzado', e.target.checked);
