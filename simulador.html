@@ -992,7 +992,7 @@ function convertirInoAEscena(src, nombre) {
       const sync = () => { pintar(); ver(ev); };
       const txt = el('input', { type: 'text', value: l.t, placeholder: 'texto (sin tildes ni ñ)' });
       txt.oninput = () => { l.t = txt.value; sync(); };
-      const tam = sel([[1, 'Tam 1'], [2, 'Tam 2'], [3, 'Tam 3'], [4, 'Tam 4']], l.tam, v => { l.tam = +v; sync(); });
+      const tam = sel([[1, 'Tam 1'], [2, 'Tam 2'], [3, 'Tam 3'], [4, 'Tam 4'], [5, 'Tam 5']], l.tam, v => { l.tam = +v; sync(); });
       const selH = sel([['izq', '◀ Izquierda'], ['centro', '⬌ Centrado'], ['der', 'Derecha ▶'], ['libre', 'Libre']], l.ah, v => { if (v === 'libre') l.x = posX(l); l.ah = v; sync(); });
       const selV = sel([['arriba', '▲ Arriba'], ['centro', '⬍ Centro'], ['abajo', '▼ Abajo'], ['libre', 'Libre']], l.av, v => { if (v === 'libre') l.y = posY(l); l.av = v; sync(); });
       sx.oninput = () => { l.x = Math.min(+sx.value, maxX()); l.ah = 'libre'; selH.value = 'libre'; sync(); };
