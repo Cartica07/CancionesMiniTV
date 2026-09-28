@@ -187,7 +187,7 @@
           <span>seg</span>
           <button class="chico secundario" id="btnRetraso">Aplicar</button>
         </div>
-        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Agrega un silencio inicial antes de que arranque la melodía (la pantalla queda en negro hasta ese momento). Dejalo en 0 para que arranque de una.</p>
+        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Agrega un silencio inicial antes de que arranque la melodía. En ese lapso (de 0 hasta ese segundo) podés poner textos o imágenes moviendo la barra ahí y usando los botones de agregar evento. Dejalo en 0 para que arranque de una.</p>
         <audio id="audioRef"></audio>
       </div>
     </div>
@@ -946,25 +946,23 @@ function convertirInoAEscena(src, nombre) {
 
   function actualizarEnPosicion(ms, conSonido) {
     const idx = notaEnPosicion(ms);
-    if (idx == null || idx < 0) {
-      if (gainNode) gainNode.gain.value = 0;
-      dibujarEscenaEnCanvas(null);
-      document.getElementById('scrub').value = ms;
-      document.getElementById('tiempoActual').textContent = formatoTiempo(ms);
-      document.getElementById('estadoNota').textContent = (idx === -1) ? 'silencio inicial (todavia no arranca la melodia)...' : 'Sin canción cargada.';
-      return;
-    }
+    if (idx == null) { if (gainNode) gainNode.gain.value = 0; return; }
+    // antes del retraso inicial la melodia todavia no arranco: no suena nada, pero los eventos
+    // (texto / imagen) que hayas puesto en ese lapso SI se muestran normalmente
+    const enRetraso = ms < inicioMs[0];
     const [freq] = escena.notas[idx];
     if (gainNode) {
-      if (conSonido && freq > 0 && (!usarMp3 || modoSonido !== 'mp3')) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }
+      if (!enRetraso && conSonido && freq > 0 && (!usarMp3 || modoSonido !== 'mp3')) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }
       else gainNode.gain.value = 0;
     }
     const evento = eventoActivoEn(ms);
     dibujarEscenaEnCanvas(evento);
     document.getElementById('scrub').value = ms;
     document.getElementById('tiempoActual').textContent = formatoTiempo(ms);
-    document.getElementById('estadoNota').textContent =
-      'nota ' + (idx + 1) + ' / ' + escena.notas.length + (evento ? '  —  evento activo: ' + (evento.tipo === 'texto' ? ((evento.lineas || []).map(l => l.t).filter(Boolean).join(' / ') || '(vacío)') : evento.imagen) : '');
+    const txtEvento = evento ? ('evento activo: ' + (evento.tipo === 'texto' ? ((evento.lineas || []).map(l => l.t).filter(Boolean).join(' / ') || '(vacío)') : evento.imagen)) : '';
+    document.getElementById('estadoNota').textContent = enRetraso
+      ? 'silencio inicial (la melodía arranca a los ' + formatoTiempo(inicioMs[0]) + ')' + (txtEvento ? '  —  ' + txtEvento : '')
+      : 'nota ' + (idx + 1) + ' / ' + escena.notas.length + (txtEvento ? '  —  ' + txtEvento : '');
   }
 
   function loopRAF(timestamp) {
