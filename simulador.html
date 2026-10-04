@@ -98,6 +98,15 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .item-galeria .borrar-item { width: 100%; border: none; border-top: 1px solid var(--line); background: transparent;
     color: var(--danger); font-size: .66rem; padding: 3px; cursor: pointer; }
+  .seg-gal { display: flex; gap: 6px; margin-top: 16px; }
+  .seg-gal button { flex: 1; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink-dim); padding: 6px 8px; border-radius: 6px; font-size: .74rem; cursor: pointer; }
+  .seg-gal button.activo { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  .resumen-global { font-size: .7rem; color: var(--ink-dim); margin: 0 0 10px; grid-column: 1 / -1; }
+  .item-galeria .canciones-item { font-size: .62rem; padding: 0 6px 4px; text-align: center; color: var(--ink-dim); opacity: .8;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item-galeria .agregar-item { width: 100%; border: none; border-top: 1px solid var(--line); background: transparent;
+    color: var(--accent); font-size: .66rem; padding: 3px; cursor: pointer; }
+  .item-galeria .agregar-item:disabled { color: var(--ink-dim); cursor: default; opacity: .7; }
   .aviso { font-size: .74rem; padding: 8px 10px; border-radius: 6px; margin-top: 10px; }
   .aviso.ok { background: var(--accent-dim); color: var(--accent); }
   .aviso.error { background: #4a1f1c; color: var(--danger); }
@@ -239,7 +248,11 @@
             <button class="chico" id="btnAgregarGaleria" disabled>Agregar a la galería</button>
           </div>
         </div>
-        <h2 style="margin-top:16px;">Galería</h2>
+        <div class="seg-gal">
+          <button id="btnGalEsta" class="activo">Esta canción</button>
+          <button id="btnGalGlobal">🌐 Galería global</button>
+        </div>
+        <h2 id="tituloGaleria" style="margin-top:10px;">Galería</h2>
         <div class="galeria-imagenes" id="galeriaImagenes">
           <p class="sin-imagenes">Sin imágenes todavía.</p>
         </div>
@@ -1178,7 +1191,76 @@ function convertirInoAEscena(src, nombre) {
 
   // ==================== galeria de imagenes ====================
   let canvasTmpProcesado = null;
+  // ---- galeria global: junta las imagenes de TODAS las canciones guardadas en una sola vista, sin repetidas ----
+  let galeriaGlobal = false;
+  // dos imagenes son "la misma" si tienen el mismo tamaño y los mismos pixeles (aunque se llamen distinto)
+  const claveImagen = (img) => img.width + 'x' + img.height + ':' + Array.from(img.bitmap).join(',');
+  function reunirGaleriaGlobal() {
+    const todos = cargarProyectos();
+    const actual = localStorage.getItem(CLAVE_ACTUAL);
+    const fuentes = [];
+    if (actual) todos[actual] = Object.assign({}, todos[actual], { imagenes: escena.imagenes }); // lo ultimo, aunque no se haya autoguardado aun
+    else fuentes.push({ cancion: escena.nombre || 'esta canción', imagenes: escena.imagenes });
+    const claves = Object.keys(todos).sort((a, b) => a.localeCompare(b));
+    if (actual) claves.sort((a, b) => (b === actual) - (a === actual)); // la cancion abierta primero
+    claves.forEach(c => fuentes.push({ cancion: c, imagenes: todos[c].imagenes || {} }));
+    const mapa = new Map(); let total = 0;
+    fuentes.forEach(f => Object.keys(f.imagenes).forEach(nombre => {
+      const img = f.imagenes[nombre]; if (!img || !img.bitmap) return;
+      total++;
+      const k = claveImagen(img);
+      if (!mapa.has(k)) mapa.set(k, { nombre, img, usos: [] });
+      mapa.get(k).usos.push({ cancion: f.cancion, nombre });
+    }));
+    return { items: Array.from(mapa.values()), total, canciones: fuentes.length };
+  }
+  function agregarDeGlobal(item) {
+    const k = claveImagen(item.img);
+    if (Object.keys(escena.imagenes).some(n => claveImagen(escena.imagenes[n]) === k)) return; // ya esta (con cualquier nombre)
+    let nombre = (item.nombre || 'imagen').replace(/[^a-zA-Z0-9_]/g, '_') || 'imagen';
+    if (/^[0-9]/.test(nombre)) nombre = '_' + nombre;
+    while (escena.imagenes[nombre]) nombre += '_';
+    escena.imagenes[nombre] = { bitmap: Array.from(item.img.bitmap), width: item.img.width, height: item.img.height };
+    renderGaleria(); renderEventos(); guardarProyectoActual();
+  }
+  function renderGaleriaGlobal() {
+    const cont = document.getElementById('galeriaImagenes');
+    const { items, total, canciones } = reunirGaleriaGlobal();
+    cont.innerHTML = '';
+    if (items.length === 0) { cont.innerHTML = '<p class="sin-imagenes">Todavía no hay imágenes en ninguna canción.</p>'; return; }
+    const res = document.createElement('p'); res.className = 'resumen-global';
+    res.textContent = items.length + (items.length === 1 ? ' imagen única' : ' imágenes únicas') + ' · ' + total + ' en total en ' + canciones + (canciones === 1 ? ' canción' : ' canciones');
+    cont.appendChild(res);
+    const yaEstan = new Set(Object.keys(escena.imagenes).map(n => claveImagen(escena.imagenes[n])));
+    items.forEach(it => {
+      const item = document.createElement('div'); item.className = 'item-galeria';
+      const canvas = document.createElement('canvas'); canvas.width = ANCHO; canvas.height = ALTO;
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
+      dibujarBitmapEnCanvas(ctx, new Uint8Array(it.img.bitmap), it.img.width, it.img.height, '#7fffe0');
+      item.appendChild(canvas);
+      const nom = document.createElement('div'); nom.className = 'nombre-item'; nom.textContent = it.nombre; item.appendChild(nom);
+      const cs = document.createElement('div'); cs.className = 'canciones-item';
+      const unicas = Array.from(new Set(it.usos.map(u => u.cancion)));
+      cs.textContent = unicas.join(', ');
+      cs.title = it.usos.map(u => u.cancion + (u.nombre !== it.nombre ? ' (' + u.nombre + ')' : '')).join('\n');
+      item.appendChild(cs);
+      const btn = document.createElement('button'); btn.className = 'agregar-item';
+      if (yaEstan.has(claveImagen(it.img))) { btn.textContent = '✓ ya está en esta canción'; btn.disabled = true; }
+      else { btn.textContent = '＋ Agregar a esta canción'; btn.onclick = () => agregarDeGlobal(it); }
+      item.appendChild(btn);
+      cont.appendChild(item);
+    });
+  }
   function renderGaleria() {
+    document.getElementById('btnGalEsta').classList.toggle('activo', !galeriaGlobal);
+    document.getElementById('btnGalGlobal').classList.toggle('activo', galeriaGlobal);
+    document.getElementById('tituloGaleria').textContent = galeriaGlobal ? 'Galería global' : 'Galería';
+    if (galeriaGlobal) renderGaleriaGlobal(); else renderGaleriaCancion();
+  }
+  document.getElementById('btnGalEsta').addEventListener('click', () => { galeriaGlobal = false; renderGaleria(); });
+  document.getElementById('btnGalGlobal').addEventListener('click', () => { galeriaGlobal = true; renderGaleria(); });
+
+  function renderGaleriaCancion() {
     const cont = document.getElementById('galeriaImagenes');
     const nombres = Object.keys(escena.imagenes);
     cont.innerHTML = '';
