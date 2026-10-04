@@ -182,12 +182,19 @@
         </div>
         <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Corta la melodía (y borra los eventos que queden después) lo más cerca posible de ese segundo, buscando un silencio cercano para no cortar una nota a la mitad.</p>
         <div class="fila-mp3" id="filaRetraso">
-          <span>⏱ Empezar a sonar despues de</span>
+          <span>⏱ Empezar a sonar el ino despues de</span>
           <input type="number" id="retrasoSeg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
           <span>seg</span>
           <button class="chico secundario" id="btnRetraso">Aplicar</button>
         </div>
         <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Agrega un silencio inicial antes de que arranque la melodía. En ese lapso (de 0 hasta ese segundo) podés poner textos o imágenes moviendo la barra ahí y usando los botones de agregar evento. Dejalo en 0 para que arranque de una.</p>
+        <div class="fila-mp3" id="filaRetrasoMp3">
+          <span>🎧 Empezar a sonar el mp3 despues de</span>
+          <input type="number" id="retrasoMp3Seg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
+          <span>seg</span>
+          <button class="chico secundario" id="btnRetrasoMp3">Aplicar</button>
+        </div>
+        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Igual que la opción de arriba pero para el mp3: queda en silencio desde el 0 hasta ese segundo y arranca justo cuando la reproducción llega ahí. No mueve la melodía ni los eventos, solo el audio del mp3. Dejalo en 0 para que arranque de una.</p>
         <audio id="audioRef"></audio>
       </div>
     </div>
@@ -348,7 +355,7 @@
   }
 
   // ==================== estado ====================
-  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, retrasoMs: 0 };
+  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, retrasoMs: 0, retrasoMp3Ms: 0 };
 
   // ==================== proyectos guardados (localStorage) ====================
   const CLAVE_PROYECTOS = 'oled_sim_proyectos_v1';
@@ -363,7 +370,7 @@
     const nombre = localStorage.getItem(CLAVE_ACTUAL);
     if (!nombre) return;
     const todos = cargarProyectos();
-    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, actualizado: Date.now() };
+    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, actualizado: Date.now() };
     guardarProyectos(todos);
   }
   function renderSelectorProyectos() {
@@ -381,16 +388,18 @@
     const todos = cargarProyectos();
     if (!todos[nombre]) {
       if (!crearSiNoExiste) return false;
-      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, meta: [], src: null, retrasoMs: 0, actualizado: Date.now() };
+      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, meta: [], src: null, retrasoMs: 0, retrasoMp3Ms: 0, actualizado: Date.now() };
       guardarProyectos(todos);
     }
     const p = todos[nombre];
-    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0 };
+    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0 };
     localStorage.setItem(CLAVE_ACTUAL, nombre);
     document.getElementById('inputNombreCancion').value = nombre;
     recalcularTimeline(); renderEventos(); renderGaleria(); renderSelectorProyectos();
     posicionMs = 0; actualizarEnPosicion(0, false);
     document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
+    document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
+    sincronizarMp3Reposo();
     return true;
   }
   document.getElementById('selectorProyecto').addEventListener('change', (e) => {
@@ -425,11 +434,19 @@
   let audioCtx = null, osc = null, gainNode = null;
   const audioRef = document.getElementById('audioRef'); let usarMp3 = false; let modoSonido = 'mp3';
   const desfase = () => parseFloat(document.getElementById('desfaseMp3').value) || 0;
+  // "Empezar a sonar el mp3 despues de": el mp3 queda en silencio hasta retrasoMp3Ms y recien ahi arranca (desde su segundo 0).
+  const retrasoMp3 = () => (escena && escena.retrasoMp3Ms) || 0;
+  // posicion (ms) dentro del mp3 que le toca a un instante `ms` del timeline; negativa = el mp3 todavia no arranco
+  const posMp3 = (ms) => ms - retrasoMp3() + desfase();
   function sincronizarMp3() {
     if (!usarMp3) return;
-    if (reproduciendo) { audioRef.currentTime = (posicionMs + desfase()) / 1000; audioRef.play(); } else audioRef.pause();
+    if (!reproduciendo) { audioRef.pause(); return; }
+    const p = posMp3(posicionMs);
+    if (p >= 0) { audioRef.currentTime = p / 1000; audioRef.play(); }
+    else { audioRef.pause(); audioRef.currentTime = 0; } // todavia no le toca: lo arranca loopRAF cuando llegue
   }
-  function irMp3(ms) { if (usarMp3) { audioRef.pause(); audioRef.currentTime = (ms + desfase()) / 1000; } }
+  function irMp3(ms) { if (usarMp3) { audioRef.pause(); audioRef.currentTime = Math.max(0, posMp3(ms)) / 1000; } }
+  function sincronizarMp3Reposo() { if (!reproduciendo) irMp3(posicionMs); }
 
   // ---- modelo de texto: cada linea = {t, tam, x, y, ah, av}; ah/av = izq|centro|der|libre y arriba|centro|abajo|libre ----
   const L = (t, tam, x, y) => ({ t, tam, x, y, ah: 'libre', av: 'libre' });
@@ -876,6 +893,19 @@ function convertirInoAEscena(src, nombre) {
     aplicarRetraso(v);
   });
 
+  // Retraso del mp3: no toca escena.notas ni el timeline, solo cuando arranca el audio.
+  function aplicarRetrasoMp3(segundos) {
+    escena.retrasoMp3Ms = Math.max(0, Math.round(segundos * 1000));
+    if (reproduciendo) sincronizarMp3(); else irMp3(posicionMs);
+    actualizarEnPosicion(posicionMs, false);
+    guardarProyectoActual();
+  }
+  document.getElementById('btnRetrasoMp3').addEventListener('click', () => {
+    const v = parseFloat(document.getElementById('retrasoMp3Seg').value || '0');
+    if (!isFinite(v) || v < 0) { alert('Poné cuántos segundos de silencio querés antes de que arranque el mp3 (0 para sacarlo).'); return; }
+    aplicarRetrasoMp3(v);
+  });
+
   function notaEnPosicion(ms) {
     if (escena.notas.length === 0) return null;
     let lo = 0, hi = escena.notas.length - 1;
@@ -960,15 +990,22 @@ function convertirInoAEscena(src, nombre) {
     document.getElementById('scrub').value = ms;
     document.getElementById('tiempoActual').textContent = formatoTiempo(ms);
     const txtEvento = evento ? ('evento activo: ' + (evento.tipo === 'texto' ? ((evento.lineas || []).map(l => l.t).filter(Boolean).join(' / ') || '(vacío)') : evento.imagen)) : '';
-    document.getElementById('estadoNota').textContent = enRetraso
+    const enRetrasoMp3 = usarMp3 && retrasoMp3() > 0 && ms < retrasoMp3() - desfase();
+    document.getElementById('estadoNota').textContent = (enRetraso
       ? 'silencio inicial (la melodía arranca a los ' + formatoTiempo(inicioMs[0]) + ')' + (txtEvento ? '  —  ' + txtEvento : '')
-      : 'nota ' + (idx + 1) + ' / ' + escena.notas.length + (txtEvento ? '  —  ' + txtEvento : '');
+      : 'nota ' + (idx + 1) + ' / ' + escena.notas.length + (txtEvento ? '  —  ' + txtEvento : ''))
+      + (enRetrasoMp3 ? '  —  mp3 en silencio (arranca a los ' + formatoTiempo(retrasoMp3()) + ')' : '');
   }
 
   function loopRAF(timestamp) {
     if (reproduciendo) {
-      if (usarMp3 && !audioRef.paused) posicionMs = audioRef.currentTime * 1000 - desfase(); else if (ultimoTimestamp != null) posicionMs += (timestamp - ultimoTimestamp);
+      if (usarMp3 && !audioRef.paused) posicionMs = audioRef.currentTime * 1000 + retrasoMp3() - desfase(); else if (ultimoTimestamp != null) posicionMs += (timestamp - ultimoTimestamp);
       ultimoTimestamp = timestamp;
+      // el mp3 estaba esperando su retraso: cuando el timeline llega ahi, arranca (no se reinicia si ya termino)
+      if (usarMp3 && retrasoMp3() > 0 && audioRef.paused && !audioRef.ended) {
+        const pm = posMp3(posicionMs);
+        if (pm >= 0) { audioRef.currentTime = pm / 1000; audioRef.play(); }
+      }
       if (posicionMs >= duracionTotalMs) {
         posicionMs = duracionTotalMs; reproduciendo = false; ultimoTimestamp = null;
         document.getElementById('btnPlay').textContent = '▶ Reproducir';
@@ -1245,10 +1282,12 @@ function convertirInoAEscena(src, nombre) {
       if (nueva.notas.length === 0) throw new Error('No se encontraron notas — ¿es el .ino correcto?');
       const modoParche = document.getElementById('chkModoParche').checked;
       if (!modoParche) { nueva.eventos = []; nueva.meta = []; nueva.src = null; }
-      escena = nueva; escena.imagenes = escena.imagenes || {}; escena.retrasoMs = 0;
+      escena = nueva; escena.imagenes = escena.imagenes || {}; escena.retrasoMs = 0; escena.retrasoMp3Ms = 0;
       recalcularTimeline(); renderEventos(); renderGaleria();
       posicionMs = 0; actualizarEnPosicion(0, false);
       document.getElementById('retrasoSeg').value = '';
+      document.getElementById('retrasoMp3Seg').value = '';
+      sincronizarMp3Reposo();
       guardarProyectoActual();
       aviso.innerHTML = '<div class="aviso ok">Importado: ' + escena.notas.length + ' notas' + (modoParche ? (', ' + escena.eventos.length + ' eventos de texto (modo parche).') : ' — pantalla en blanco, lista para agregar texto.') + '</div>';
       setTimeout(() => { document.getElementById('modalIno').classList.remove('abierto'); aviso.innerHTML = ''; }, 1200);
@@ -1272,11 +1311,13 @@ function convertirInoAEscena(src, nombre) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), imagenes: data.imagenes || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0 };
+        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), imagenes: data.imagenes || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0, retrasoMp3Ms: data.retrasoMp3Ms || 0 };
         document.getElementById('inputNombreCancion').value = escena.nombre;
         recalcularTimeline(); renderEventos(); renderGaleria();
         posicionMs = 0; actualizarEnPosicion(0, false);
         document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
+        document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
+        sincronizarMp3Reposo();
       } catch (err) { alert('JSON inválido: ' + err.message); }
     };
     reader.readAsText(file);
