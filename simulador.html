@@ -44,6 +44,7 @@
   }
   button.secundario { background: transparent; color: var(--ink); border: 1px solid var(--line); }
   button.chico { padding: 5px 9px; font-size: .72rem; }
+  button.chico:disabled { opacity: .4; cursor: default; }
   button.peligro { background: var(--danger); color: #2a0705; }
   button:disabled { opacity: .35; cursor: not-allowed; }
   input[type="file"] { display: none; }
@@ -189,6 +190,7 @@
           <span>seg, quitando</span>
           <select id="recorteLado"><option value="final">el final</option><option value="inicio">el inicio</option></select>
           <button class="chico secundario" id="btnRecortar">Recortar</button>
+          <button class="chico secundario" id="btnDeshacerRecorte" disabled title="Vuelve la canción, los textos y los retrasos a como estaban antes del último recorte">↶ Deshacer recorte</button>
         </div>
         <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Deja la canción con esa duración. <b>El final</b>: corta lo último (y borra los eventos que queden después). <b>El inicio</b>: saca lo primero y corre todo (textos, imágenes y mp3) para que arranque en 0:00. En los dos casos busca un silencio cercano al punto de corte para no partir una nota a la mitad.</p>
         <div class="fila-mp3" id="filaRetraso">
@@ -384,7 +386,7 @@
     const nombre = localStorage.getItem(CLAVE_ACTUAL);
     if (!nombre) return;
     const todos = cargarProyectos();
-    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, actualizado: Date.now() };
+    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
     guardarProyectos(todos);
   }
   function renderSelectorProyectos() {
@@ -406,7 +408,7 @@
       guardarProyectos(todos);
     }
     const p = todos[nombre];
-    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0 };
+    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
     localStorage.setItem(CLAVE_ACTUAL, nombre);
     document.getElementById('inputNombreCancion').value = nombre;
     recalcularTimeline(); renderEventos(); renderGaleria(); renderSelectorProyectos();
@@ -864,6 +866,7 @@ function convertirInoAEscena(src, nombre) {
       alert('Elegi una duracion menor a la actual (' + formatoTiempo(duracionTotalMs) + ').');
       return;
     }
+    apilarRecorte();   // guarda el estado actual para poder deshacer
     if (lado === 'inicio') { recortarInicio(objetivoMs); return; }
     const idx = notaEnPosicion(objetivoMs);
     const VENTANA = 40; // cuantas notas mira hacia atras/adelante buscando un silencio
@@ -882,9 +885,48 @@ function convertirInoAEscena(src, nombre) {
     escena.eventos = escena.eventos.filter(ev => tIni(ev) < duracionTotalMs);
     if (posicionMs > duracionTotalMs) posicionMs = duracionTotalMs;
     renderEventos(); renderGaleria(); actualizarEnPosicion(posicionMs, false);
+    sellarRecorte();
     guardarProyectoActual();
     avisoRecorteModoParche();
   }
+
+  // ---- deshacer recorte: antes de cada recorte se guarda (hasta 5) la melodia, los eventos y los retrasos ----
+  const MAX_DESHACER_RECORTE = 5;
+  const firmaRecorte = () => JSON.stringify([escena.eventos, escena.retrasoMs || 0, escena.retrasoMp3Ms || 0]);
+  function apilarRecorte() {
+    const pila = escena.deshacerRecorte = escena.deshacerRecorte || [];
+    pila.push(JSON.parse(JSON.stringify({ notas: escena.notas, meta: escena.meta || [], eventos: escena.eventos, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0 })));
+    if (pila.length > MAX_DESHACER_RECORTE) pila.shift();
+  }
+  function sellarRecorte() {   // anota como quedo todo justo despues del recorte, para avisar si despues se editaron cosas
+    const pila = escena.deshacerRecorte;
+    if (pila && pila.length) pila[pila.length - 1].despues = firmaRecorte();
+  }
+  function actualizarBtnDeshacer() {
+    const b = document.getElementById('btnDeshacerRecorte'); if (!b) return;
+    const n = (escena.deshacerRecorte || []).length;
+    b.disabled = n === 0; b.textContent = '↶ Deshacer recorte' + (n ? ' (' + n + ')' : '');
+  }
+  function deshacerUltimoRecorte() {
+    const pila = escena.deshacerRecorte || [];
+    if (!pila.length) return;
+    const s = pila[pila.length - 1];
+    if (s.despues !== undefined && s.despues !== firmaRecorte() &&
+        !confirm('Después del recorte cambiaste textos, imágenes o retrasos. Si deshacés el recorte, esos cambios se pierden. ¿Seguir?')) return;
+    pila.pop();
+    escena.notas = s.notas; escena.meta = s.meta; escena.eventos = s.eventos;
+    escena.retrasoMs = s.retrasoMs; escena.retrasoMp3Ms = s.retrasoMp3Ms;
+    recalcularTimeline();
+    document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
+    document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
+    reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
+    document.getElementById('btnPlay').textContent = '▶ Reproducir';
+    if (gainNode) gainNode.gain.value = 0;
+    irMp3(0);
+    renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
+    guardarProyectoActual();
+  }
+  document.getElementById('btnDeshacerRecorte').addEventListener('click', deshacerUltimoRecorte);
 
   // En modo parche el .ino exportado es TU archivo original con las llamadas de pantalla reescritas: no se le sacan notas.
   function avisoRecorteModoParche() {
@@ -947,6 +989,7 @@ function convertirInoAEscena(src, nombre) {
     if (gainNode) gainNode.gain.value = 0;
     irMp3(0);
     renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
+    sellarRecorte();
     guardarProyectoActual();
     avisoRecorteModoParche();
   }
@@ -1123,6 +1166,7 @@ function convertirInoAEscena(src, nombre) {
 
   // ==================== render de la lista de eventos ====================
   function renderEventos() {
+    actualizarBtnDeshacer();
     const cont = document.getElementById('listaEventos');
     cont.innerHTML = '';
     if (escena.eventos.length === 0) { cont.innerHTML = '<p class="sin-eventos">Todavía no hay eventos.</p>'; return; }
