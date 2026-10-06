@@ -186,10 +186,11 @@
         <div class="fila-mp3" id="filaRecorte">
           <span>✂ Recortar a</span>
           <input type="number" id="recorteSeg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
-          <span>seg</span>
+          <span>seg, quitando</span>
+          <select id="recorteLado"><option value="final">el final</option><option value="inicio">el inicio</option></select>
           <button class="chico secundario" id="btnRecortar">Recortar</button>
         </div>
-        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Corta la melodía (y borra los eventos que queden después) lo más cerca posible de ese segundo, buscando un silencio cercano para no cortar una nota a la mitad.</p>
+        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Deja la canción con esa duración. <b>El final</b>: corta lo último (y borra los eventos que queden después). <b>El inicio</b>: saca lo primero y corre todo (textos, imágenes y mp3) para que arranque en 0:00. En los dos casos busca un silencio cercano al punto de corte para no partir una nota a la mitad.</p>
         <div class="fila-mp3" id="filaRetraso">
           <span>⏱ Empezar a sonar el ino despues de</span>
           <input type="number" id="retrasoSeg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
@@ -856,13 +857,14 @@ function convertirInoAEscena(src, nombre) {
   // Recorta la cancion a los N segundos pedidos: busca el silencio (nota freq 0) mas cercano a ese
   // instante dentro de una ventana de notas, y corta justo ahi para no partir una nota a la mitad.
   // Si no hay ningun silencio cerca, corta en la nota que este sonando en ese instante tal cual.
-  function recortarCancion(segObjetivo) {
+  function recortarCancion(segObjetivo, lado) {
     if (escena.notas.length === 0) { alert('No hay ninguna cancion cargada.'); return; }
     const objetivoMs = Math.round(segObjetivo * 1000);
     if (!(objetivoMs > 0) || objetivoMs >= duracionTotalMs) {
       alert('Elegi una duracion menor a la actual (' + formatoTiempo(duracionTotalMs) + ').');
       return;
     }
+    if (lado === 'inicio') { recortarInicio(objetivoMs); return; }
     const idx = notaEnPosicion(objetivoMs);
     const VENTANA = 40; // cuantas notas mira hacia atras/adelante buscando un silencio
     const desde = Math.max(0, idx - VENTANA), hasta = Math.min(escena.notas.length - 1, idx + VENTANA);
@@ -881,11 +883,77 @@ function convertirInoAEscena(src, nombre) {
     if (posicionMs > duracionTotalMs) posicionMs = duracionTotalMs;
     renderEventos(); renderGaleria(); actualizarEnPosicion(posicionMs, false);
     guardarProyectoActual();
+    avisoRecorteModoParche();
+  }
+
+  // En modo parche el .ino exportado es TU archivo original con las llamadas de pantalla reescritas: no se le sacan notas.
+  function avisoRecorteModoParche() {
+    if (escena.src) alert('Ojo: este proyecto está en modo parche. El recorte se aplicó en el simulador, pero el .ino que exportás conserva TODA la melodía original. Para que el recorte salga en el archivo, importá el .ino sin tildar "modo parche avanzado".');
+  }
+
+  // Recorta el INICIO: deja la cancion con `objetivoMs` de duracion sacando lo primero. Busca el silencio mas cercano al
+  // punto de corte (para no partir una nota), saca las notas anteriores y corre todo lo demas hacia 0:00:
+  // eventos de pantalla, retraso inicial y mp3. El ultimo evento que estaba en pantalla justo antes del corte se
+  // conserva en 0:00 (para que la cancion no arranque con la pantalla vacia si ya habia algo mostrandose).
+  function recortarInicio(objetivoMs) {
+    const corteMs = duracionTotalMs - objetivoMs;   // cuanto sacar del principio (tiempo del timeline, con el retraso inicial)
+    const retraso = escena.retrasoMs || 0;
+    let k = 0, T0, nuevoRetraso = 0;                // k = notas que se sacan; T0 = instante del timeline que pasa a ser 0:00
+    if (corteMs <= retraso) {                       // el corte cae dentro del silencio inicial: alcanza con acortarlo
+      T0 = corteMs; nuevoRetraso = retraso - corteMs;
+    } else {
+      const idx = notaEnPosicion(corteMs);
+      const VENTANA = 40;                           // cuantas notas mira hacia atras/adelante buscando un silencio
+      const desde = Math.max(0, idx - VENTANA), hasta = Math.min(escena.notas.length - 1, idx + VENTANA);
+      let mejorDist = Infinity; k = idx;            // sin silencio cerca: la nota que suena en ese instante queda entera
+      for (let i = desde; i <= hasta; i++) {
+        if (escena.notas[i][0] === 0 && i + 1 < escena.notas.length) {
+          const dist = Math.abs(inicioMs[i + 1] - corteMs);
+          if (dist < mejorDist) { mejorDist = dist; k = i + 1; }
+        }
+      }
+      const m = escena.meta || [];                  // no partir una llamada nota() en dos (modo parche)
+      while (k > 0 && k < escena.notas.length && m[k] && m[k - 1] && m[k].g != null && m[k].g === m[k - 1].g && m[k].k === m[k - 1].k && m[k].inv === m[k - 1].inv) k++;
+      k = Math.min(k, escena.notas.length - 1);
+      T0 = inicioMs[k];
+    }
+    // eventos: tiempo original de cada uno (con el timeline todavia sin tocar)
+    const tViejo = new Map(escena.eventos.map(ev => [ev, tIni(ev)]));
+    const queda = (ev) => escena.src ? ev.nota >= k : tViejo.get(ev) >= T0;
+    const resto = escena.eventos.filter(queda);
+    const antes = escena.eventos.filter(ev => !queda(ev)).sort((a, b) => tViejo.get(a) - tViejo.get(b));
+    const ultimo = antes[antes.length - 1];
+    const hayEnCero = resto.some(ev => escena.src ? ev.nota === k : tViejo.get(ev) <= T0);
+    const conservar = resto.slice();
+    if (ultimo && !hayEnCero) {
+      const restante = ultimo.dur ? tViejo.get(ultimo) + ultimo.dur - T0 : Infinity;
+      if (restante > 0) { if (ultimo.dur) ultimo.dur = Math.round(restante); conservar.push(ultimo); tViejo.set(ultimo, T0); }
+    }
+    // aplicar
+    escena.notas = escena.notas.slice(k);
+    if (escena.meta && escena.meta.length) escena.meta = escena.meta.slice(k);
+    escena.retrasoMs = nuevoRetraso;
+    if (usarMp3) escena.retrasoMp3Ms = (escena.retrasoMp3Ms || 0) - T0;   // el mp3 sigue en su lugar: arranca T0 mas adentro
+    recalcularTimeline();
+    escena.eventos = conservar;
+    escena.eventos.forEach(ev => {
+      if (escena.src) ev.nota = Math.max(0, Math.min(escena.notas.length - 1, ev.nota - k));
+      else { ev.ms = Math.max(0, Math.round(tViejo.get(ev) - T0)); ev.nota = notaEnPosicion(ev.ms) ?? 0; }
+    });
+    document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
+    document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
+    reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
+    document.getElementById('btnPlay').textContent = '▶ Reproducir';
+    if (gainNode) gainNode.gain.value = 0;
+    irMp3(0);
+    renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
+    guardarProyectoActual();
+    avisoRecorteModoParche();
   }
   document.getElementById('btnRecortar').addEventListener('click', () => {
     const v = parseFloat(document.getElementById('recorteSeg').value);
     if (!isFinite(v)) { alert('Poné cuántos segundos querés que dure.'); return; }
-    recortarCancion(v);
+    recortarCancion(v, document.getElementById('recorteLado').value);
   });
 
   // Agrega (o quita) un silencio inicial antes de que arranque la melodia.
