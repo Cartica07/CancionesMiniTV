@@ -147,6 +147,7 @@
   .opciones-conv h2 { margin-bottom: 10px; }
   .grid-conv { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
   @media (max-width: 600px) { .grid-conv { grid-template-columns: 1fr; } }
+  .aviso-char { font-size: .68rem; color: var(--warn); margin: 2px 0 4px; }
 </style>
 </head>
 <body>
@@ -551,7 +552,35 @@
   // ---- modelo de texto: cada linea = {t, tam, x, y, ah, av}; ah/av = izq|centro|der|libre y arriba|centro|abajo|libre ----
   const L = (t, tam, x, y) => ({ t, tam, x, y, ah: 'libre', av: 'libre' });
   const nuevaLinea = (t, tam, ah, av) => ({ t, tam, x: 0, y: 0, ah, av });
-  const txtOled = (t) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]/g, '?');
+  // ---- Texto para la OLED ----
+  // La fuente de Adafruit_GFX es CP437: 1 byte por caracter (no UTF-8). Sus codigos 0x80-0xAF incluyen ñ Ñ ¿ ¡ á é í ó ú ü É y otras,
+  // asi que se imprimen como texto normal, sin hacer una imagen por palabra. Lo que la fuente no tiene (Á Í Ó Ú ã...) pierde la tilde.
+  const CP437_ALTO = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»';   // posiciones 0x80 a 0xAF
+  const deCp437 = (c) => c >= 0x80 && c <= 0xAF ? CP437_ALTO[c - 0x80] : c < 0x80 ? String.fromCharCode(c) : '?';
+  // Devuelve el texto "en codigos de la fuente": cada caracter pasa a ser el de Unicode igual al codigo de su glifo (ñ -> 0xA4)
+  const txtOled = (t) => Array.from((t || '').normalize('NFC')).map(ch => {
+    const i = CP437_ALTO.indexOf(ch);
+    if (i >= 0) return String.fromCharCode(0x80 + i);
+    const base = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');   // Á -> A, ã -> a ...
+    return /^[\x20-\x7e]$/.test(base) ? base : '?';
+  }).join('');
+  // Texto en codigos de la fuente -> literal de C. Los >= 0x80 salen como \ooo (octal de 3 digitos): el .ino queda en ASCII puro,
+  // sin problemas de codificacion, y un digito pegado despues no se mezcla con la secuencia.
+  const cStr = (s) => '"' + Array.from(s).map(ch => {
+    const c = ch.charCodeAt(0);
+    if (ch === '"' || ch === '\\') return '\\' + ch;
+    return c >= 0x20 && c <= 0x7e ? ch : '\\' + c.toString(8).padStart(3, '0');
+  }).join('') + '"';
+  // Caracteres escritos que la OLED no tiene (se ven sin tilde o como '?')
+  function avisoChars(t) {
+    const raros = [];
+    Array.from(new Set(Array.from((t || '').normalize('NFC')))).forEach(ch => {
+      if (CP437_ALTO.includes(ch)) return;
+      const r = txtOled(ch);
+      if (r !== ch) raros.push(ch + ' (se verá ' + r + ')');
+    });
+    return raros.length ? 'La fuente de la OLED no tiene: ' + raros.join(', ') + '. Sí tiene ñ Ñ ¿ ¡ á é í ó ú ü É.' : '';
+  }
   const anchoTxt = (l) => Math.max(0, txtOled(l.t).length * 6 * l.tam - l.tam);
   function posX(l) { const w = anchoTxt(l); if (l.ah === 'izq') return 0; if (l.ah === 'centro') return Math.max(0, Math.round((ANCHO - w) / 2)); if (l.ah === 'der') return Math.max(0, ANCHO - w); return Math.max(0, Math.min(l.x, ANCHO - w)); }
   function posY(l) { const h = 8 * l.tam; if (l.av === 'arriba') return 0; if (l.av === 'centro') return Math.max(0, Math.round((ALTO - h) / 2)); if (l.av === 'abajo') return Math.max(0, ALTO - h); return Math.max(0, Math.min(l.y, ALTO - h)); }
@@ -720,7 +749,7 @@ function separarArgs(s) {
   if (cur.trim()) args.push(cur);
   return args.map(a => a.trim());
 }
-function stringsLiterales(s) { const out = []; const re = /"([^"]*)"/g; let m; while ((m = re.exec(s)) !== null) out.push(m[1]); return out; }
+function stringsLiterales(s) { const out = []; const re = /"([^"]*)"/g; let m; while ((m = re.exec(s)) !== null) out.push(m[1].replace(/\\([0-7]{1,3})|\\x([0-9a-fA-F]{1,2})/g, (_, o, h) => deCp437(o !== undefined ? parseInt(o, 8) : parseInt(h, 16)))); return out; }
 
 class Interprete {
   constructor(funcs, globalScope) {
@@ -1534,8 +1563,11 @@ function convertirInoAEscena(src, nombre) {
       const maxY = () => Math.max(0, ALTO - 8 * l.tam);
       const pintar = () => { l.x = Math.min(l.x, maxX()); l.y = Math.min(l.y, maxY()); sx.max = maxX(); sy.max = maxY(); sx.value = posX(l); vx.textContent = posX(l); sy.value = posY(l); vy.textContent = posY(l); };
       const sync = () => { pintar(); ver(ev); };
-      const txt = el('input', { type: 'text', value: l.t, placeholder: 'texto (sin tildes ni ñ)' });
-      txt.oninput = () => { l.t = txt.value; sync(); };
+      const txt = el('input', { type: 'text', value: l.t, placeholder: 'texto (la ñ y las tildes ya funcionan)' });
+      const avisoCh = el('div', { className: 'aviso-char' });
+      const pintarAviso = () => { const a = avisoChars(l.t); avisoCh.textContent = a; avisoCh.style.display = a ? '' : 'none'; };
+      pintarAviso();
+      txt.oninput = () => { l.t = txt.value; pintarAviso(); sync(); };
       const tam = sel([[1, 'Tam 1'], [2, 'Tam 2'], [3, 'Tam 3'], [4, 'Tam 4'], [5, 'Tam 5']], l.tam, v => { l.tam = +v; sync(); });
       const selH = sel([['izq', '◀ Izquierda'], ['centro', '⬌ Centrado'], ['der', 'Derecha ▶'], ['libre', 'Libre']], l.ah, v => { if (v === 'libre') l.x = posX(l); l.ah = v; sync(); });
       const selV = sel([['arriba', '▲ Arriba'], ['centro', '⬍ Centro'], ['abajo', '▼ Abajo'], ['libre', 'Libre']], l.av, v => { if (v === 'libre') l.y = posY(l); l.av = v; sync(); });
@@ -1546,6 +1578,7 @@ function convertirInoAEscena(src, nombre) {
       pintar();
       caja.appendChild(el('div', { className: 'linea-ed' }, [
         el('div', { className: 'fila' }, [txt, tam, del]),
+        avisoCh,
         el('div', { className: 'fila' }, [selH, selV]),
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'X' }), sx, vx]),
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'Y' }), sy, vy])]));
@@ -2094,7 +2127,7 @@ void muestra(){ display.display(); }
     if (ev.tipo === 'fin') return '  borra();\n  muestra();\n';
     if (ev.tipo === 'imagen') return `  borra();\n  display.drawBitmap(0, 0, ${ev.imagen}, ${ANCHO}, ${ALTO}, WHITE);\n  muestra();\n`;
     let c = '  borra();\n';
-    ev.lineas.forEach(l => { if (l.t) c += `  linea(${l.tam}, ${posX(l)}, ${posY(l)}, ${JSON.stringify(txtOled(l.t))});\n`; });
+    ev.lineas.forEach(l => { if (l.t) c += `  linea(${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
     return c + '  muestra();\n';
   }
   function imagenesUsadas(ordenados, yaEn) {
@@ -2214,7 +2247,7 @@ void revisaAnim() {
       if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, ${NA}0, {} },`;
       if (ev.tipo === 'gif') return `  { ${t}, NULL, &${nomAnim(ev)}, 0, {} },`;
       const ls = lin(ev);
-      return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => `{${l.tam}, ${posX(l)}, ${posY(l)}, ${JSON.stringify(txtOled(l.t))}}`).join(', ')} } },`;
+      return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => `{${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))}}`).join(', ')} } },`;
     }).join('\n');
     const filasNotas = [];
     const notasExport = (escena.retrasoMs > 0) ? [[0, escena.retrasoMs], ...escena.notas] : escena.notas;
