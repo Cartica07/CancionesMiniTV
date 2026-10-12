@@ -135,6 +135,18 @@
   .fila-mp3 { display:flex; gap:8px; align-items:center; margin-top:10px; flex-wrap:wrap; font-size:.72rem; color:var(--ink-dim); }
   .fila-mp3 select { background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:4px 6px; border-radius:5px; font-size:.72rem; }
   .fila-mp3 input[type=number] { width:60px; background:var(--panel-2); border:1px solid var(--line); color:var(--ink); padding:4px 6px; border-radius:5px; }
+  .badge.gif { background: #6b4a1f; color: #ffc27a; }
+  .bloque-gif { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 14px; }
+  .bloque-gif h2 { margin-bottom: 10px; }
+  canvas#previewGifTmp { width: 128px; height: 64px; background: #000; image-rendering: pixelated; border-radius: 4px; border: 1px solid var(--line); flex-shrink: 0; }
+  .pegar-gif { margin: 10px 0 4px; font-size: .78rem; }
+  .pegar-gif summary { cursor: pointer; color: var(--ink-dim); }
+  textarea#pegarGif { width: 100%; min-height: 90px; margin-top: 8px; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink); border-radius: 6px; padding: 8px; font-family: monospace; font-size: .72rem; }
+  .opciones-conv { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 14px; background: var(--panel-2); }
+  .opciones-conv h2 { margin-bottom: 10px; }
+  .grid-conv { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; }
+  @media (max-width: 600px) { .grid-conv { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -224,6 +236,9 @@
           <button class="chico secundario" id="btnAgregarImagen">+ Evento de imagen acá</button>
           <button class="chico secundario" id="btnSubirImagenAca">⬆ Subir imagen y usarla acá</button>
           <input type="file" id="fileImgEvento" accept="image/*" />
+          <button class="chico secundario" id="btnAgregarEventoGif">+ Evento de GIF acá</button>
+          <button class="chico secundario" id="btnSubirGifAca">⬆ Subir GIF y usarlo acá</button>
+          <input type="file" id="fileGifEvento" accept="image/gif" />
         </div>
         <div class="lista-eventos" id="listaEventos">
           <p class="sin-eventos">Importá un .ino o cargá un JSON para empezar.</p>
@@ -231,19 +246,57 @@
       </div>
 
       <div id="panelImagenes" style="display:none;">
+        <div class="opciones-conv">
+          <h2>⚙ Opciones de conversión (valen para imágenes y GIF)</h2>
+          <div class="grid-conv">
+            <div class="campo-mini">
+              <label>Tamaño en la pantalla</label>
+              <select id="convEscala">
+                <option value="ajustar">Ajustar (mantiene la proporción)</option>
+                <option value="llenar">Llenar, recortando los bordes</option>
+                <option value="estirar">Estirar a 128×64</option>
+                <option value="original">Tamaño original (centrado)</option>
+              </select>
+            </div>
+            <div class="campo-mini">
+              <label>Fondo (lo que no cubre la imagen)</label>
+              <select id="convFondo">
+                <option value="negro">Negro (apagado)</option>
+                <option value="blanco">Blanco (encendido)</option>
+              </select>
+            </div>
+            <div class="campo-mini">
+              <label>Difuminado</label>
+              <select id="convDifuminado">
+                <option value="floyd">Floyd–Steinberg</option>
+                <option value="atkinson">Atkinson</option>
+                <option value="bayer">Bayer (trama fija)</option>
+                <option value="umbral">Sin difuminar (solo umbral)</option>
+              </select>
+            </div>
+            <div class="campo-mini">
+              <label>Umbral / brillo: <b id="convUmbralVal" style="color:var(--accent);">127</b> (más alto = más oscuro)</label>
+              <input type="range" id="convUmbral" min="0" max="255" value="127" />
+            </div>
+          </div>
+          <label class="chk-adv" style="margin-top:8px;"><input type="checkbox" id="convInvertir"> Invertir colores</label>
+          <p class="descripcion-campo" id="convAyuda" style="font-size:.7rem; color:var(--ink-dim); margin:6px 0 0;"></p>
+          <details class="pegar-gif">
+            <summary>Rotar y voltear</summary>
+            <div class="fila-mp3">
+              <span>Rotar</span>
+              <select id="convRotar"><option value="0">0°</option><option value="90">90° horario</option><option value="180">180°</option><option value="270">270° horario</option></select>
+              <label class="chk-adv"><input type="checkbox" id="convVolteoH"> Voltear horizontal</label>
+              <label class="chk-adv"><input type="checkbox" id="convVolteoV"> Voltear vertical</label>
+            </div>
+          </details>
+        </div>
+
         <div class="zona-carga-img" id="zonaCargaImg">Hacé clic o arrastrá una imagen para convertirla</div>
         <input type="file" id="fileImg" accept="image/*" />
         <div class="previsualizacion-img">
           <canvas id="previewImgTmp" width="128" height="64"></canvas>
           <div class="mini-controles-img" style="flex:1;">
-            <div class="fila-check-mini">
-              <span>Difuminado (dithering)</span>
-              <input type="checkbox" id="chkDitheringMini" checked />
-            </div>
-            <div class="fila-umbral-mini">
-              <div class="rot"><span>Umbral</span><b id="valorUmbralMini">127</b></div>
-              <input type="range" id="umbralMini" min="0" max="255" value="127" />
-            </div>
             <div class="campo-mini">
               <label>Nombre</label>
               <input type="text" id="nombreImgTmp" placeholder="img_ejemplo" />
@@ -251,6 +304,37 @@
             <button class="chico" id="btnAgregarGaleria" disabled>Agregar a la galería</button>
           </div>
         </div>
+        <div class="bloque-gif">
+          <h2>🎞 Convertir un GIF animado</h2>
+          <div class="zona-carga-img" id="zonaCargaGif">Hacé clic o arrastrá un .gif para convertirlo</div>
+          <input type="file" id="fileGif" accept="image/gif" />
+          <div class="previsualizacion-img">
+            <canvas id="previewGifTmp" width="128" height="64"></canvas>
+            <div class="mini-controles-img" style="flex:1;">
+              <div class="campos-evento">
+                <div class="campo-mini"><label>1 de cada N cuadros</label><input type="number" id="gifSalto" min="1" step="1" value="1" /></div>
+                <div class="campo-mini"><label>Velocidad ×</label><input type="number" id="gifVel" min="0.1" max="10" step="0.1" value="1" /></div>
+              </div>
+              <div class="campo-mini">
+                <label>Nombre</label>
+                <input type="text" id="nombreGifTmp" placeholder="gif_ejemplo" />
+              </div>
+              <button class="chico" id="btnAgregarGifGaleria" disabled>Agregar GIF a la galería</button>
+            </div>
+          </div>
+          <p class="estado-nota" id="infoGifTmp">Sin GIF cargado.</p>
+          <details class="pegar-gif">
+            <summary>📋 O pegá el código de los cuadros (image2cpp, o un .ino que ya los tenga)</summary>
+            <textarea id="pegarGif" placeholder="Pegá acá los arreglos de bytes, uno por cuadro:&#10;static const uint8_t PROGMEM cuadro_01[] = { 0x00, 0x00, ... };&#10;static const uint8_t PROGMEM cuadro_02[] = { ... };"></textarea>
+            <div class="fila-mp3">
+              <span>ms por cuadro</span><input type="number" id="gifMsCuadro" value="100" min="20" step="10" />
+              <button class="chico secundario" id="btnUsarCodigoGif">Usar este código</button>
+            </div>
+            <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:6px 0 0;">Cada arreglo tiene que ser un cuadro de 128×64 (1024 bytes), en el orden de la animación. En image2cpp: Canvas size 128×64, Draw mode "Horizontal – 1 bit per pixel" y salida "Arduino code". Todos los cuadros duran lo mismo (el código no trae tiempos); si cada cuadro necesita su propio tiempo, subí el .gif.</p>
+          </details>
+          <div id="avisoGif"></div>
+        </div>
+
         <div class="seg-gal">
           <button id="btnGalEsta" class="activo">Esta canción</button>
           <button id="btnGalGlobal">🌐 Galería global</button>
@@ -371,7 +455,7 @@
   }
 
   // ==================== estado ====================
-  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, retrasoMs: 0, retrasoMp3Ms: 0 };
+  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, gifs: {}, retrasoMs: 0, retrasoMp3Ms: 0 };
 
   // ==================== proyectos guardados (localStorage) ====================
   const CLAVE_PROYECTOS = 'oled_sim_proyectos_v1';
@@ -380,13 +464,13 @@
     try { return JSON.parse(localStorage.getItem(CLAVE_PROYECTOS)) || {}; } catch (e) { return {}; }
   }
   function guardarProyectos(obj) {
-    try { localStorage.setItem(CLAVE_PROYECTOS, JSON.stringify(obj)); } catch (e) { console.error('no se pudo guardar en localStorage', e); }
+    try { localStorage.setItem(CLAVE_PROYECTOS, JSON.stringify(obj)); } catch (e) { console.error('no se pudo guardar en localStorage', e); if (!window._avisoCuota) { window._avisoCuota = true; alert('No se pudo guardar el proyecto en el navegador (¿se llenó el espacio? Los GIF largos ocupan bastante). Usá "Guardar JSON" para no perder el trabajo.'); } }
   }
   function guardarProyectoActual() {
     const nombre = localStorage.getItem(CLAVE_ACTUAL);
     if (!nombre) return;
     const todos = cargarProyectos();
-    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
+    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, gifs: escena.gifs || {}, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
     guardarProyectos(todos);
   }
   function renderSelectorProyectos() {
@@ -404,11 +488,11 @@
     const todos = cargarProyectos();
     if (!todos[nombre]) {
       if (!crearSiNoExiste) return false;
-      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, meta: [], src: null, retrasoMs: 0, retrasoMp3Ms: 0, actualizado: Date.now() };
+      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, gifs: {}, meta: [], src: null, retrasoMs: 0, retrasoMp3Ms: 0, actualizado: Date.now() };
       guardarProyectos(todos);
     }
     const p = todos[nombre];
-    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
+    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, gifs: p.gifs || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
     localStorage.setItem(CLAVE_ACTUAL, nombre);
     document.getElementById('inputNombreCancion').value = nombre;
     recalcularTimeline(); renderEventos(); renderGaleria(); renderSelectorProyectos();
@@ -778,61 +862,274 @@ function convertirInoAEscena(src, nombre) {
   return { nombre, notas: interp.notas, eventos: interp.eventos, imagenes: {}, meta: interp.meta, src: interp.nuevo ? src : null };
 }
 
-  // ==================== procesamiento de imagenes (igual algoritmo que la pagina) ====================
-  function cargarYRedimensionar(src) {
+  // ==================== decodificador de GIF (sin librerias) ====================
+  // Lee el GIF, descomprime cada cuadro (LZW), respeta paleta local/global, transparencia, entrelazado y
+  // los modos de "disposal", y entrega cada cuadro YA COMPUESTO (pantalla completa, RGBA) junto con su duracion en ms.
+  // porCuadro(rgba, delayMs, indice) se llama una vez por cuadro; rgba se reutiliza: hay que consumirlo ahi mismo.
+  function decodificarGif(buffer, porCuadro) {
+    const d = new Uint8Array(buffer); let p = 0;
+    const leer16 = () => { const v = d[p] | (d[p + 1] << 8); p += 2; return v; };
+    const cab = String.fromCharCode(d[0], d[1], d[2], d[3], d[4], d[5]);
+    if (cab !== 'GIF87a' && cab !== 'GIF89a') throw new Error('el archivo no es un GIF');
+    p = 6;
+    const W = leer16(), H = leer16(), banderas = d[p++]; p += 2; // color de fondo + relacion de aspecto: no se usan
+    if (!W || !H) throw new Error('GIF con tamaño 0');
+    let paletaGlobal = null;
+    if (banderas & 0x80) { const n = 2 << (banderas & 7); paletaGlobal = d.subarray(p, p + n * 3); p += n * 3; }
+    const lienzo = new Uint8ClampedArray(W * H * 4);   // transparente al inicio
+    let guardado = null, anterior = null, gce = null, n = 0;
+    const saltarSub = () => { while (p < d.length) { const t = d[p++]; if (t === 0) break; p += t; } };
+
+    while (p < d.length) {
+      const b = d[p++];
+      if (b === 0x3B) break;                              // fin del archivo
+      if (b === 0x21) {                                   // extension
+        const etiqueta = d[p++];
+        if (etiqueta === 0xF9) {                          // control grafico: duracion, transparencia, disposal
+          const tam = d[p++], pf = d[p];
+          gce = { disposal: (pf >> 2) & 7, transp: (pf & 1) ? d[p + 3] : -1, delay: (d[p + 1] | (d[p + 2] << 8)) * 10 };
+          p += tam; p++;                                  // + terminador
+        } else saltarSub();
+        continue;
+      }
+      if (b !== 0x2C) continue;                           // byte raro: se ignora
+      const fx = leer16(), fy = leer16(), fw = leer16(), fh = leer16(), fl = d[p++];
+      let paleta = paletaGlobal;
+      if (fl & 0x80) { const nn = 2 << (fl & 7); paleta = d.subarray(p, p + nn * 3); p += nn * 3; }
+      if (!paleta) throw new Error('GIF sin paleta de colores');
+      const entrelazado = !!(fl & 0x40), minCod = d[p++];
+      // juntar los sub-bloques de datos
+      const trozos = []; let total = 0;
+      while (p < d.length) { const t = d[p++]; if (t === 0) break; trozos.push(d.subarray(p, p + t)); total += t; p += t; }
+      const datos = new Uint8Array(total); let o = 0; trozos.forEach(t => { datos.set(t, o); o += t.length; });
+      const indices = lzwDescomprimir(minCod, datos, fw * fh);
+
+      // disposal del cuadro anterior
+      if (anterior) {
+        if (anterior.disposal === 2) {
+          for (let y = 0; y < anterior.h; y++) for (let x = 0; x < anterior.w; x++) {
+            const X = anterior.x + x, Y = anterior.y + y;
+            if (X < W && Y < H) lienzo.fill(0, (Y * W + X) * 4, (Y * W + X) * 4 + 4);
+          }
+        } else if (anterior.disposal === 3 && guardado) lienzo.set(guardado);
+      }
+      const disposal = gce ? gce.disposal : 0;
+      guardado = disposal === 3 ? lienzo.slice() : null;
+
+      // orden de filas si esta entrelazado
+      let filas = null;
+      if (entrelazado) {
+        filas = new Int32Array(fh); let i = 0;
+        [[0, 8], [4, 8], [2, 4], [1, 2]].forEach(([ini, paso]) => { for (let y = ini; y < fh; y += paso) filas[i++] = y; });
+      }
+      const transp = gce ? gce.transp : -1;
+      for (let i = 0; i < fh; i++) {
+        const y = fy + (filas ? filas[i] : i); if (y >= H) continue;
+        for (let x = 0; x < fw; x++) {
+          const X = fx + x; if (X >= W) continue;
+          const idx = indices[i * fw + x];
+          if (idx === transp) continue;
+          const dst = (y * W + X) * 4, src = idx * 3;
+          lienzo[dst] = paleta[src]; lienzo[dst + 1] = paleta[src + 1]; lienzo[dst + 2] = paleta[src + 2]; lienzo[dst + 3] = 255;
+        }
+      }
+      let delay = gce ? gce.delay : 100;
+      if (delay <= 10) delay = 100;                       // igual que los navegadores: 0 o 1 centesima = 100 ms
+      porCuadro(lienzo, delay, n++, W, H);
+      anterior = { disposal, x: fx, y: fy, w: fw, h: fh };
+      gce = null;
+    }
+    if (n === 0) throw new Error('el GIF no tiene cuadros');
+    return { ancho: W, alto: H, cuadros: n };
+  }
+
+  function lzwDescomprimir(minCod, datos, npix) {
+    const clear = 1 << minCod, eoi = clear + 1;
+    let tam = minCod + 1, mask = (1 << tam) - 1, sig = eoi + 1;
+    const prefijo = new Uint16Array(4096), sufijo = new Uint8Array(4096), pila = new Uint8Array(4097);
+    const out = new Uint8Array(npix);
+    let op = 0, bits = 0, nbits = 0, ip = 0, viejo = -1, primero = 0;
+    while (op < npix) {
+      while (nbits < tam) { if (ip >= datos.length) return out; bits |= datos[ip++] << nbits; nbits += 8; }
+      let codigo = bits & mask; bits >>= tam; nbits -= tam;
+      if (codigo === clear) { tam = minCod + 1; mask = (1 << tam) - 1; sig = eoi + 1; viejo = -1; continue; }
+      if (codigo === eoi) break;
+      if (viejo === -1) { out[op++] = codigo; viejo = codigo; primero = codigo; continue; }
+      const entrante = codigo; let sp = 0;
+      if (codigo >= sig) { pila[sp++] = primero; codigo = viejo; }      // caso KwKwK: el codigo todavia no esta en la tabla
+      while (codigo >= clear) { pila[sp++] = sufijo[codigo]; codigo = prefijo[codigo]; }
+      primero = codigo; pila[sp++] = primero;
+      if (sig < 4096) {
+        prefijo[sig] = viejo; sufijo[sig] = primero; sig++;
+        if ((sig & mask) === 0 && sig < 4096) { tam++; mask = (1 << tam) - 1; }
+      }
+      viejo = entrante;
+      while (sp > 0 && op < npix) out[op++] = pila[--sp];
+    }
+    return out;
+  }
+
+  // ==================== GIF: modelo y ayudas ====================
+  // Un GIF de la galeria se guarda asi: { width, height, frames: [bitmap 1-bit en base64, ...], delays: [ms, ...] }
+  // (el base64 pesa ~3 veces menos que una lista de numeros: el autoguardado y el JSON quedan livianos)
+  const GIFS = () => escena.gifs || (escena.gifs = {});
+  function bytesAB64(u8) { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s); }
+  function b64ABytes(b) { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
+  const nombreC = (txt, def) => { let n = String(txt || '').trim().replace(/[^a-zA-Z0-9_]/g, '_') || def; if (/^[0-9]/.test(n)) n = '_' + n; return n; };
+  const nombreCuadro = (g, i, n) => g + '_' + String(i).padStart(Math.max(2, String(n).length), '0');
+  // nombres de C que ocupa un GIF al exportarse: sus cuadros y sus tablas
+  function identsDeGif(g, n) {
+    const a = [g, 'anim_' + g, 'anim_' + g + '_una', g + '_cuadros', g + '_demoras'];
+    for (let i = 1; i <= n; i++) a.push(nombreCuadro(g, i, n));
+    return a;
+  }
+  // devuelve un nombre que no choque con ninguna imagen ni con otro GIF (ni con los cuadros de otro GIF)
+  function nombreLibreGif(base, n) {
+    const usados = new Set(Object.keys(escena.imagenes));
+    Object.keys(GIFS()).forEach(g => identsDeGif(g, GIFS()[g].frames.length).forEach(x => usados.add(x)));
+    let nombre = base;
+    while (identsDeGif(nombre, n).some(x => usados.has(x))) nombre += '_';
+    return nombre;
+  }
+  function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+  const claveGif = (g) => g.frames.length + ':' + hashStr(g.frames.join('|') + '#' + g.delays.join(','));
+
+  // cache por objeto GIF (se rehace solo si el GIF se reemplaza): tiempos acumulados y cuadros ya listos para pintar
+  const cacheGif = new WeakMap();
+  function infoGif(g) {
+    let c = cacheGif.get(g);
+    if (!c) { let t = 0; c = { cum: g.delays.map(d => (t += d)), total: t, imgs: [] }; cacheGif.set(g, c); }
+    return c;
+  }
+  // cuadro que toca a los `trans` ms de arrancar: con repetir vuelve a empezar, sin repetir se queda en el ultimo
+  // (es la MISMA cuenta que hace el .ino exportado: primer cuadro cuyo tiempo acumulado supera al transcurrido)
+  function indiceCuadroGif(g, trans, repetir) {
+    const c = infoGif(g), n = g.frames.length;
+    if (n <= 1 || c.total <= 0) return 0;
+    let t = trans > 0 ? trans : 0;
+    if (repetir) t %= c.total; else if (t >= c.total) return n - 1;
+    let lo = 0, hi = n - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (c.cum[mid] > t) hi = mid; else lo = mid + 1; }
+    return lo;
+  }
+  function imageDataGif(g, i) {
+    const c = infoGif(g);
+    if (!c.imgs[i]) {
+      const bytes = b64ABytes(g.frames[i]), w = g.width, h = g.height, bpf = Math.ceil(w / 8);
+      const id = new ImageData(w, h), px = id.data;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const on = (bytes[y * bpf + (x >> 3)] >> (7 - (x & 7))) & 1, o = (y * w + x) * 4;
+        px[o] = on ? 127 : 0; px[o + 1] = on ? 255 : 0; px[o + 2] = on ? 224 : 0; px[o + 3] = 255;   // mismo color que el resto de la pantalla virtual
+      }
+      c.imgs[i] = id;
+    }
+    return c.imgs[i];
+  }
+  function dibujarGifEnCanvas(canvas, g, tMs, repetir) {
+    if (!g || !g.frames || !g.frames.length) return;
+    canvas.getContext('2d').putImageData(imageDataGif(g, indiceCuadroGif(g, tMs, repetir !== false)), 0, 0);
+  }
+  const resumenGif = (g) => {
+    const total = g.delays.reduce((a, b) => a + b, 0), unicos = new Set(g.frames).size;
+    return g.frames.length + ' cuadros' + (unicos < g.frames.length ? ' (' + unicos + ' distintos)' : '') + ' · ' + (total / 1000).toFixed(2) + ' s por vuelta · ' + unicos + ' KB de flash';
+  };
+
+  // ==================== conversion a bitmap 1-bit para la OLED 128x64 ====================
+  // Un solo motor para imagenes sueltas y para cada cuadro de un GIF:
+  //   fuente (cualquier tamaño) -> [rotar / voltear] -> acomodar en 128x64 -> gris -> [invertir] -> blanco y negro (umbral o difuminado)
+  // Las opciones se leen del panel "Opciones de conversion" (se recuerdan entre sesiones).
+  const CLAVE_CONV = 'oled_sim_conv_v1';
+  const IDS_CONV = ['convEscala', 'convFondo', 'convDifuminado', 'convUmbral', 'convInvertir', 'convRotar', 'convVolteoH', 'convVolteoV'];
+  function opcionesConv() {
+    const v = (id) => document.getElementById(id);
+    return {
+      escala: v('convEscala').value,            // ajustar | llenar | estirar | original
+      fondo: v('convFondo').value,              // negro | blanco
+      modo: v('convDifuminado').value,          // floyd | atkinson | bayer | umbral
+      umbral: parseInt(v('convUmbral').value, 10),
+      invertir: v('convInvertir').checked,
+      rotar: parseInt(v('convRotar').value, 10),   // 0 | 90 | 180 | 270 (horario)
+      volteoH: v('convVolteoH').checked, volteoV: v('convVolteoV').checked
+    };
+  }
+  // lo que obliga a volver a acomodar los cuadros del GIF (el resto solo cambia como se pasa a blanco y negro)
+  const claveGeometria = (o) => [o.escala, o.fondo, o.rotar, o.volteoH, o.volteoV].join('|');
+
+  // Dibuja `fuente` (imagen o canvas de sw x sh) dentro de dctx (canvas 128x64) segun tamaño, fondo, rotacion y volteo
+  function acomodarEn128x64(fuente, sw, sh, o, dctx) {
+    const giro = o.rotar === 90 || o.rotar === 270;
+    const rw = giro ? sh : sw, rh = giro ? sw : sh;            // tamaño de la imagen ya girada
+    const ratio = rw / rh, ratioDest = ANCHO / ALTO;
+    let dw, dh;
+    if (o.escala === 'estirar') { dw = ANCHO; dh = ALTO; }
+    else if (o.escala === 'original') { dw = rw; dh = rh; }
+    else if ((o.escala === 'llenar') === (ratio > ratioDest)) { dh = ALTO; dw = Math.max(1, Math.round(ALTO * ratio)); }   // llenar con imagen ancha / ajustar con imagen alta
+    else { dw = ANCHO; dh = Math.max(1, Math.round(ANCHO / ratio)); }
+    const ox = Math.round((ANCHO - dw) / 2), oy = Math.round((ALTO - dh) / 2);   // centrada (si sobra, se recorta parejo)
+    dctx.fillStyle = o.fondo === 'blanco' ? '#fff' : '#000'; dctx.fillRect(0, 0, ANCHO, ALTO);
+    dctx.imageSmoothingEnabled = o.escala !== 'original'; dctx.imageSmoothingQuality = 'high';
+    if (o.rotar === 0 && !o.volteoH && !o.volteoV) { dctx.drawImage(fuente, ox, oy, dw, dh); return; }
+    dctx.save();
+    dctx.translate(ox + dw / 2, oy + dh / 2);
+    dctx.scale(o.volteoH ? -1 : 1, o.volteoV ? -1 : 1);        // el volteo se aplica sobre lo que se ve (despues de girar)
+    dctx.rotate(o.rotar * Math.PI / 180);
+    const pw = giro ? dh : dw, ph = giro ? dw : dh;            // tamaño antes de girar
+    dctx.drawImage(fuente, -pw / 2, -ph / 2, pw, ph);
+    dctx.restore();
+  }
+  function grisDeCanvas(canvas) {    // 128x64, gris = 0.299 R + 0.587 G + 0.114 B redondeado
+    const d = canvas.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, ANCHO, ALTO).data;
+    const g = new Uint8Array(ANCHO * ALTO);
+    for (let k = 0; k < g.length; k++) g[k] = Math.round(0.299 * d[k * 4] + 0.587 * d[k * 4 + 1] + 0.114 * d[k * 4 + 2]);
+    return g;
+  }
+
+  // Matriz de Bayer 8x8 (valores 0..63): se arma duplicando la de 2x2 [[0,2],[3,1]]
+  const BAYER8 = (() => {
+    let m = [[0]];
+    while (m.length < 8) {
+      const n = m.length, s = [];
+      for (let y = 0; y < 2 * n; y++) { s.push([]); for (let x = 0; x < 2 * n; x++) s[y].push(m[y % n][x % n] * 4 + [[0, 2], [3, 1]][y >= n ? 1 : 0][x >= n ? 1 : 0]); }
+      m = s;
+    }
+    return m;
+  })();
+  // Gris 128x64 -> bitmap 1-bit (formato de Adafruit drawBitmap: 16 bytes por fila, bit mas alto = pixel de la izquierda).
+  // El umbral hace de "brillo" en todos los modos: mas alto = mas oscuro. 127 es el punto neutro.
+  function grisABitmap(gris, o) {
+    const w = ANCHO, h = ALTO, bpf = w >> 3, bm = new Uint8Array(bpf * h), u = o.umbral;
+    const src = o.invertir ? gris.map(v => 255 - v) : gris;
+    const on = (x, y) => { bm[y * bpf + (x >> 3)] |= (1 << (7 - (x & 7))); };
+    if (o.modo === 'umbral') {
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (src[y * w + x] > u) on(x, y);
+    } else if (o.modo === 'bayer') {
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (src[y * w + x] + (127 - u) > (BAYER8[y & 7][x & 7] + 0.5) * 255 / 64) on(x, y);
+    } else {                                                    // difusion del error: floyd | atkinson
+      const g = Float32Array.from(src), atk = o.modo === 'atkinson';
+      const suma = (x, y, e) => { if (x >= 0 && x < w && y < h) g[y * w + x] += e; };
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const viejo = g[y * w + x], nuevo = viejo >= u ? 255 : 0, error = viejo - nuevo;
+        if (nuevo === 255) on(x, y);
+        if (atk) { const e = error / 8; suma(x + 1, y, e); suma(x + 2, y, e); suma(x - 1, y + 1, e); suma(x, y + 1, e); suma(x + 1, y + 1, e); suma(x, y + 2, e); }   // reparte 6/8 del error
+        else { suma(x + 1, y, error * 7 / 16); suma(x - 1, y + 1, error * 3 / 16); suma(x, y + 1, error * 5 / 16); suma(x + 1, y + 1, error * 1 / 16); }
+      }
+    }
+    return bm;
+  }
+
+  // ---- imagen suelta ----
+  function cargarFuenteImagen(src) {     // devuelve la imagen original, sin tocar, para poder reconvertirla al cambiar opciones
     return new Promise((resolve, reject) => {
       const img = new Image();
-      img.onload = () => {
-        const ratioImagen = img.width / img.height, ratioDestino = ANCHO / ALTO;
-        let nw, nh;
-        if (ratioImagen > ratioDestino) { nw = ANCHO; nh = Math.round(ANCHO / ratioImagen); }
-        else { nh = ALTO; nw = Math.round(ALTO * ratioImagen); }
-        const ox = Math.round((ANCHO - nw) / 2), oy = Math.round((ALTO - nh) / 2);
-        const canvas = document.createElement('canvas'); canvas.width = ANCHO; canvas.height = ALTO;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
-        ctx.drawImage(img, ox, oy, nw, nh);
-        resolve(canvas);
-      };
+      img.onload = () => resolve({ el: img, w: img.width, h: img.height });
       img.onerror = () => reject(new Error('no se pudo cargar'));
       img.src = src;
     });
   }
-  function aEscalaGrises(canvas) {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    for (let i = 0; i < d.data.length; i += 4) {
-      const g = Math.round(0.299 * d.data[i] + 0.587 * d.data[i + 1] + 0.114 * d.data[i + 2]);
-      d.data[i] = d.data[i + 1] = d.data[i + 2] = g;
-    }
-    ctx.putImageData(d, 0, 0); return canvas;
-  }
-  function aMonoUmbral(canvas, umbral) {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const w = canvas.width, h = canvas.height, bpf = Math.ceil(w / 8);
-    const bitmap = new Uint8Array(bpf * h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const g = d.data[(y * w + x) * 4];
-      if (g > umbral) bitmap[y * bpf + (x >> 3)] |= (1 << (7 - (x & 7)));
-    }
-    return { bitmap, width: w, height: h };
-  }
-  function aMonoDither(canvas, umbral) {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const w = canvas.width, h = canvas.height;
-    const gris = new Float32Array(w * h);
-    for (let p = 0; p < w * h; p++) gris[p] = d.data[p * 4];
-    const bpf = Math.ceil(w / 8); const bitmap = new Uint8Array(bpf * h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const idx = y * w + x, viejo = gris[idx], nuevo = viejo >= umbral ? 255 : 0, error = viejo - nuevo;
-      if (nuevo === 255) bitmap[y * bpf + (x >> 3)] |= (1 << (7 - (x & 7)));
-      if (x + 1 < w) gris[idx + 1] += error * 7 / 16;
-      if (y + 1 < h) { if (x > 0) gris[idx - 1 + w] += error * 3 / 16; gris[idx + w] += error * 5 / 16; if (x + 1 < w) gris[idx + 1 + w] += error * 1 / 16; }
-    }
-    return { bitmap, width: w, height: h };
+  function convertirImagen(fuente, o) {
+    const dest = document.createElement('canvas'); dest.width = ANCHO; dest.height = ALTO;
+    acomodarEn128x64(fuente.el, fuente.w, fuente.h, o, dest.getContext('2d', { willReadFrequently: true }));
+    return { bitmap: grisABitmap(grisDeCanvas(dest), o), width: ANCHO, height: ALTO };
   }
   function dibujarBitmapEnCanvas(ctx, bitmap, w, h, color) {
     ctx.fillStyle = color;
@@ -1082,7 +1379,7 @@ function convertirInoAEscena(src, nombre) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
 
-  function dibujarEscenaEnCanvas(evento) {
+  function dibujarEscenaEnCanvas(evento, ms) {
     const ctx = document.getElementById('pantallaOled').getContext('2d');
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
     if (!evento) return;
@@ -1095,6 +1392,9 @@ function convertirInoAEscena(src, nombre) {
     } else if (evento.tipo === 'imagen') {
       const img = escena.imagenes[evento.imagen];
       if (img) dibujarBitmapEnCanvas(ctx, new Uint8Array(img.bitmap), img.width, img.height, '#7fffe0');
+    } else if (evento.tipo === 'gif') {
+      // el cuadro depende de cuanto lleva el GIF desde que arranco su evento
+      dibujarGifEnCanvas(document.getElementById('pantallaOled'), GIFS()[evento.gif], (ms ?? posicionMs) - tIni(evento), evento.loop !== false);
     }
   }
 
@@ -1110,10 +1410,10 @@ function convertirInoAEscena(src, nombre) {
       else gainNode.gain.value = 0;
     }
     const evento = eventoActivoEn(ms);
-    dibujarEscenaEnCanvas(evento);
+    dibujarEscenaEnCanvas(evento, ms);
     document.getElementById('scrub').value = ms;
     document.getElementById('tiempoActual').textContent = formatoTiempo(ms);
-    const txtEvento = evento ? ('evento activo: ' + (evento.tipo === 'texto' ? ((evento.lineas || []).map(l => l.t).filter(Boolean).join(' / ') || '(vacío)') : evento.imagen)) : '';
+    const txtEvento = evento ? ('evento activo: ' + (evento.tipo === 'texto' ? ((evento.lineas || []).map(l => l.t).filter(Boolean).join(' / ') || '(vacío)') : evento.tipo === 'gif' ? 'GIF ' + evento.gif : evento.imagen)) : '';
     const enRetrasoMp3 = usarMp3 && retrasoMp3() > 0 && ms < retrasoMp3() - desfase();
     document.getElementById('estadoNota').textContent = (enRetraso
       ? 'silencio inicial (la melodía arranca a los ' + formatoTiempo(inicioMs[0]) + ')' + (txtEvento ? '  —  ' + txtEvento : '')
@@ -1177,7 +1477,7 @@ function convertirInoAEscena(src, nombre) {
       const t = tIni(ev);
 
       const cab = document.createElement('div'); cab.className = 'evento-cabecera';
-      const badge = document.createElement('span'); badge.className = 'badge' + (ev.tipo === 'imagen' ? ' imagen' : '');
+      const badge = document.createElement('span'); badge.className = 'badge' + (ev.tipo === 'imagen' ? ' imagen' : ev.tipo === 'gif' ? ' gif' : '');
       badge.textContent = ev.tipo; cab.appendChild(badge);
       const tiempo = document.createElement('span'); tiempo.className = 'evento-tiempo';
       tiempo.textContent = 'nota ' + ev.nota + ' · ' + formatoTiempo(t) + (escena.meta && escena.meta[ev.nota] && escena.meta[ev.nota].g ? ' · ' + escena.meta[ev.nota].g : ''); cab.appendChild(tiempo);
@@ -1194,6 +1494,14 @@ function convertirInoAEscena(src, nombre) {
       const campos = document.createElement('div'); campos.className = 'campos-evento';
       if (ev.tipo === 'texto') {
         campos.className = 'campos-evento una-col'; editorTexto(ev, campos);
+      } else if (ev.tipo === 'gif') {
+        const opciones = Object.keys(GIFS()), g = GIFS()[ev.gif];
+        campos.className = 'campos-evento una-col';
+        campos.appendChild(campoSelect('GIF', opciones.length ? opciones : ['(sin GIF en galería)'], ev.gif || opciones[0] || '', v => { ev.gif = v; renderEventos(); actualizarEnPosicion(posicionMs, false); }));
+        const chk = el('input', { type: 'checkbox', checked: ev.loop !== false });
+        chk.onchange = () => { ev.loop = chk.checked; actualizarEnPosicion(posicionMs, false); };
+        campos.appendChild(el('label', { className: 'chk-adv' }, [chk, el('span', { textContent: 'Repetir en bucle (si no, se queda en el último cuadro)' })]));
+        if (g) campos.appendChild(el('p', { className: 'estado-nota', textContent: resumenGif(g), style: 'margin:0;' }));
       } else {
         const opciones = Object.keys(escena.imagenes);
         campos.className = 'campos-evento una-col';
@@ -1285,10 +1593,7 @@ function convertirInoAEscena(src, nombre) {
     if (!file) return;
     const rd = new FileReader();
     rd.onload = async (e) => {
-      const cv = await cargarYRedimensionar(e.target.result);
-      const umbral = parseInt(document.getElementById('umbralMini').value, 10);
-      const gris = aEscalaGrises(cv);
-      const r = document.getElementById('chkDitheringMini').checked ? aMonoDither(gris, umbral) : aMonoUmbral(gris, umbral);
+      const r = convertirImagen(await cargarFuenteImagen(e.target.result), opcionesConv());
       let nombre = file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_') || 'imagen';
       if (/^[0-9]/.test(nombre)) nombre = '_' + nombre;
       while (escena.imagenes[nombre]) nombre += '_';
@@ -1302,7 +1607,7 @@ function convertirInoAEscena(src, nombre) {
   document.getElementById('fileImgEvento').onchange = (e) => { subirImagenEvento(e.target.files[0]); e.target.value = ''; };
 
   // ==================== galeria de imagenes ====================
-  let canvasTmpProcesado = null;
+  let fuenteImgTmp = null;   // la imagen original, para reconvertirla al cambiar las opciones
   // ---- galeria global: junta las imagenes de TODAS las canciones guardadas en una sola vista, sin repetidas ----
   let galeriaGlobal = false;
   // dos imagenes son "la misma" si tienen el mismo tamaño y los mismos pixeles (aunque se llamen distinto)
@@ -1311,20 +1616,30 @@ function convertirInoAEscena(src, nombre) {
     const todos = cargarProyectos();
     const actual = localStorage.getItem(CLAVE_ACTUAL);
     const fuentes = [];
-    if (actual) todos[actual] = Object.assign({}, todos[actual], { imagenes: escena.imagenes }); // lo ultimo, aunque no se haya autoguardado aun
-    else fuentes.push({ cancion: escena.nombre || 'esta canción', imagenes: escena.imagenes });
+    if (actual) todos[actual] = Object.assign({}, todos[actual], { imagenes: escena.imagenes, gifs: GIFS() }); // lo ultimo, aunque no se haya autoguardado aun
+    else fuentes.push({ cancion: escena.nombre || 'esta canción', imagenes: escena.imagenes, gifs: GIFS() });
     const claves = Object.keys(todos).sort((a, b) => a.localeCompare(b));
     if (actual) claves.sort((a, b) => (b === actual) - (a === actual)); // la cancion abierta primero
-    claves.forEach(c => fuentes.push({ cancion: c, imagenes: todos[c].imagenes || {} }));
+    claves.forEach(c => fuentes.push({ cancion: c, imagenes: todos[c].imagenes || {}, gifs: todos[c].gifs || {} }));
     const mapa = new Map(); let total = 0;
-    fuentes.forEach(f => Object.keys(f.imagenes).forEach(nombre => {
-      const img = f.imagenes[nombre]; if (!img || !img.bitmap) return;
-      total++;
-      const k = claveImagen(img);
-      if (!mapa.has(k)) mapa.set(k, { nombre, img, usos: [] });
-      mapa.get(k).usos.push({ cancion: f.cancion, nombre });
-    }));
-    return { items: Array.from(mapa.values()), total, canciones: fuentes.length };
+    const mapaGif = new Map(); let totalGif = 0;
+    fuentes.forEach(f => {
+      Object.keys(f.imagenes).forEach(nombre => {
+        const img = f.imagenes[nombre]; if (!img || !img.bitmap) return;
+        total++;
+        const k = claveImagen(img);
+        if (!mapa.has(k)) mapa.set(k, { nombre, img, usos: [] });
+        mapa.get(k).usos.push({ cancion: f.cancion, nombre });
+      });
+      Object.keys(f.gifs).forEach(nombre => {
+        const gif = f.gifs[nombre]; if (!gif || !gif.frames || !gif.frames.length) return;
+        totalGif++;
+        const k = claveGif(gif);
+        if (!mapaGif.has(k)) mapaGif.set(k, { nombre, gif, usos: [] });
+        mapaGif.get(k).usos.push({ cancion: f.cancion, nombre });
+      });
+    });
+    return { items: Array.from(mapa.values()), total, canciones: fuentes.length, gifs: Array.from(mapaGif.values()), totalGif };
   }
   function agregarDeGlobal(item) {
     const k = claveImagen(item.img);
@@ -1335,13 +1650,35 @@ function convertirInoAEscena(src, nombre) {
     escena.imagenes[nombre] = { bitmap: Array.from(item.img.bitmap), width: item.img.width, height: item.img.height };
     renderGaleria(); renderEventos(); guardarProyectoActual();
   }
+  function agregarGifDeGlobal(item) {
+    const k = claveGif(item.gif);
+    if (Object.values(GIFS()).some(g => claveGif(g) === k)) return;
+    const nombre = nombreLibreGif(nombreC(item.nombre, 'gif'), item.gif.frames.length);
+    GIFS()[nombre] = JSON.parse(JSON.stringify(item.gif));
+    renderGaleria(); renderEventos(); guardarProyectoActual();
+  }
+  // tarjeta de un GIF de la galeria (miniatura animada + datos); extra = boton de abajo
+  function tarjetaGif(nombre, gif, lineaExtra) {
+    const item = document.createElement('div'); item.className = 'item-galeria';
+    const canvas = document.createElement('canvas'); canvas.width = ANCHO; canvas.height = ALTO;
+    canvas.getContext('2d').fillStyle = '#000'; canvas.getContext('2d').fillRect(0, 0, ANCHO, ALTO);
+    dibujarGifEnCanvas(canvas, gif, 0);
+    thumbsGif.push({ canvas, gif });
+    item.appendChild(canvas);
+    const nom = document.createElement('div'); nom.className = 'nombre-item'; nom.textContent = '🎞 ' + nombre; item.appendChild(nom);
+    const inf = document.createElement('div'); inf.className = 'canciones-item';
+    inf.textContent = lineaExtra || (gif.frames.length + ' cuadros');
+    inf.title = resumenGif(gif); item.appendChild(inf);
+    return item;
+  }
   function renderGaleriaGlobal() {
     const cont = document.getElementById('galeriaImagenes');
-    const { items, total, canciones } = reunirGaleriaGlobal();
-    cont.innerHTML = '';
-    if (items.length === 0) { cont.innerHTML = '<p class="sin-imagenes">Todavía no hay imágenes en ninguna canción.</p>'; return; }
+    const { items, total, canciones, gifs, totalGif } = reunirGaleriaGlobal();
+    cont.innerHTML = ''; thumbsGif.length = 0;
+    if (items.length === 0 && gifs.length === 0) { cont.innerHTML = '<p class="sin-imagenes">Todavía no hay imágenes en ninguna canción.</p>'; return; }
     const res = document.createElement('p'); res.className = 'resumen-global';
-    res.textContent = items.length + (items.length === 1 ? ' imagen única' : ' imágenes únicas') + ' · ' + total + ' en total en ' + canciones + (canciones === 1 ? ' canción' : ' canciones');
+    res.textContent = items.length + (items.length === 1 ? ' imagen única' : ' imágenes únicas') + ' · ' + total + ' en total en ' + canciones + (canciones === 1 ? ' canción' : ' canciones') +
+      (gifs.length ? ' · ' + gifs.length + (gifs.length === 1 ? ' GIF único' : ' GIFs únicos') + ' (' + totalGif + ' en total)' : '');
     cont.appendChild(res);
     const yaEstan = new Set(Object.keys(escena.imagenes).map(n => claveImagen(escena.imagenes[n])));
     items.forEach(it => {
@@ -1362,6 +1699,17 @@ function convertirInoAEscena(src, nombre) {
       item.appendChild(btn);
       cont.appendChild(item);
     });
+    const gifsYaEstan = new Set(Object.values(GIFS()).map(claveGif));
+    gifs.forEach(it => {
+      const unicas = Array.from(new Set(it.usos.map(u => u.cancion)));
+      const item = tarjetaGif(it.nombre, it.gif, unicas.join(', '));
+      item.querySelector('.canciones-item').title = it.usos.map(u => u.cancion + (u.nombre !== it.nombre ? ' (' + u.nombre + ')' : '')).join('\n');
+      const btn = document.createElement('button'); btn.className = 'agregar-item';
+      if (gifsYaEstan.has(claveGif(it.gif))) { btn.textContent = '✓ ya está en esta canción'; btn.disabled = true; }
+      else { btn.textContent = '＋ Agregar a esta canción'; btn.onclick = () => agregarGifDeGlobal(it); }
+      item.appendChild(btn);
+      cont.appendChild(item);
+    });
   }
   function renderGaleria() {
     document.getElementById('btnGalEsta').classList.toggle('activo', !galeriaGlobal);
@@ -1374,9 +1722,9 @@ function convertirInoAEscena(src, nombre) {
 
   function renderGaleriaCancion() {
     const cont = document.getElementById('galeriaImagenes');
-    const nombres = Object.keys(escena.imagenes);
-    cont.innerHTML = '';
-    if (nombres.length === 0) { cont.innerHTML = '<p class="sin-imagenes">Sin imágenes todavía.</p>'; return; }
+    const nombres = Object.keys(escena.imagenes), gifs = Object.keys(GIFS());
+    cont.innerHTML = ''; thumbsGif.length = 0;
+    if (nombres.length === 0 && gifs.length === 0) { cont.innerHTML = '<p class="sin-imagenes">Sin imágenes todavía.</p>'; return; }
     nombres.forEach(nombre => {
       const img = escena.imagenes[nombre];
       const item = document.createElement('div'); item.className = 'item-galeria';
@@ -1390,30 +1738,28 @@ function convertirInoAEscena(src, nombre) {
       item.appendChild(btn);
       cont.appendChild(item);
     });
+    gifs.forEach(nombre => {
+      const item = tarjetaGif(nombre, GIFS()[nombre]);
+      const btn = document.createElement('button'); btn.className = 'borrar-item'; btn.textContent = 'Eliminar';
+      btn.onclick = () => { delete GIFS()[nombre]; renderGaleria(); renderEventos(); actualizarEnPosicion(posicionMs, false); };
+      item.appendChild(btn);
+      cont.appendChild(item);
+    });
   }
 
   async function procesarImagenTmp(dataUrl) {
-    canvasTmpProcesado = await cargarYRedimensionar(dataUrl);
+    fuenteImgTmp = await cargarFuenteImagen(dataUrl);
     reprocesarPreviewTmp();
   }
   function reprocesarPreviewTmp() {
-    if (!canvasTmpProcesado) return;
-    const copia = document.createElement('canvas'); copia.width = ANCHO; copia.height = ALTO;
-    copia.getContext('2d').drawImage(canvasTmpProcesado, 0, 0);
-    const gris = aEscalaGrises(copia);
-    const umbral = parseInt(document.getElementById('umbralMini').value, 10);
-    const dithering = document.getElementById('chkDitheringMini').checked;
-    const resultado = dithering ? aMonoDither(gris, umbral) : aMonoUmbral(gris, umbral);
+    if (!fuenteImgTmp) return;
+    const resultado = convertirImagen(fuenteImgTmp, opcionesConv());
     window._ultimoBitmapTmp = resultado;
     const ctxPrev = document.getElementById('previewImgTmp').getContext('2d');
     ctxPrev.fillStyle = '#000'; ctxPrev.fillRect(0, 0, ANCHO, ALTO);
     dibujarBitmapEnCanvas(ctxPrev, resultado.bitmap, resultado.width, resultado.height, '#7fffe0');
     document.getElementById('btnAgregarGaleria').disabled = false;
   }
-  document.getElementById('umbralMini').addEventListener('input', (e) => {
-    document.getElementById('valorUmbralMini').textContent = e.target.value; reprocesarPreviewTmp();
-  });
-  document.getElementById('chkDitheringMini').addEventListener('change', reprocesarPreviewTmp);
   document.getElementById('zonaCargaImg').addEventListener('click', () => document.getElementById('fileImg').click());
   document.getElementById('fileImg').addEventListener('change', (e) => {
     const file = e.target.files[0]; if (!file) return;
@@ -1442,6 +1788,202 @@ function convertirInoAEscena(src, nombre) {
     document.getElementById('nombreImgTmp').value = '';
     renderGaleria(); renderEventos();
   });
+
+  // ==================== GIF: conversion (subir un .gif o pegar codigo de cuadros) ====================
+  let gifTmp = null;      // fuente ya leida: { origen:'gif', grises:[Uint8Array 128x64...], delays } o { origen:'codigo', bitmaps:[...], delays }
+  let gifTmpRes = null;   // lo mismo ya convertido con los controles actuales, en el formato de la galeria
+  const MAX_FLASH_KB = 400;
+
+  // Lee el .gif y deja cada cuadro en gris 128x64 (con el tamaño / fondo / giro / volteo elegidos).
+  // Se guarda el archivo original: si cambia alguna de esas opciones se vuelve a leer; el resto (difuminado, umbral, invertir) se aplica sobre el gris ya listo.
+  function leerGifBuffer(buf, o) {
+    const origen = document.createElement('canvas'), dest = document.createElement('canvas');
+    dest.width = ANCHO; dest.height = ALTO;
+    const dctx = dest.getContext('2d', { willReadFrequently: true });
+    let octx = null; const grises = [], delays = [];
+    decodificarGif(buf, (rgba, delay, i, W, H) => {
+      if (!octx || origen.width !== W || origen.height !== H) { origen.width = W; origen.height = H; octx = origen.getContext('2d', { willReadFrequently: true }); }
+      octx.putImageData(new ImageData(rgba, W, H), 0, 0);
+      acomodarEn128x64(origen, W, H, o, dctx);
+      grises.push(grisDeCanvas(dest)); delays.push(delay);
+    });
+    return { origen: 'gif', grises, delays, buf, geom: claveGeometria(o) };
+  }
+  const leerGifArchivo = (file) => file.arrayBuffer().then(buf => leerGifBuffer(buf, opcionesConv()));
+
+  // Pasa a blanco y negro (segun el difuminado elegido), aplica "1 de cada N cuadros" y velocidad. Los cuadros seguidos que quedan iguales se funden en uno
+  // (suman su tiempo): se ven igual y el .ino exportado redibuja menos.
+  function construirGif(t, o, salto, vel) {
+    let bms = t.origen === 'gif' ? t.grises.map(g => grisABitmap(g, o)) : t.bitmaps;
+    let delays = t.delays.slice();
+    salto = Math.max(1, Math.round(salto) || 1); vel = vel > 0 ? vel : 1;
+    if (salto > 1) {
+      const nb = [], nd = [];
+      for (let i = 0; i < bms.length; i += salto) {
+        nb.push(bms[i]); let s = 0;
+        for (let j = i; j < Math.min(i + salto, delays.length); j++) s += delays[j];   // conserva la duracion total
+        nd.push(s);
+      }
+      bms = nb; delays = nd;
+    }
+    const frames = [], dl = [];
+    bms.forEach((bm, i) => {
+      const b64 = bytesAB64(bm), d = Math.min(65535, Math.max(20, Math.round(delays[i] / vel)));
+      if (frames.length && frames[frames.length - 1] === b64) dl[dl.length - 1] = Math.min(65535, dl[dl.length - 1] + d);
+      else { frames.push(b64); dl.push(d); }
+    });
+    return { width: ANCHO, height: ALTO, frames, delays: dl };
+  }
+  const aGifFinal = (t) => construirGif(t, opcionesConv(), parseInt(document.getElementById('gifSalto').value, 10) || 1, parseFloat(document.getElementById('gifVel').value) || 1);
+
+  function agregarGifAGaleria(res, base) {
+    const nombre = nombreLibreGif(nombreC(base, 'gif'), res.frames.length);
+    GIFS()[nombre] = JSON.parse(JSON.stringify(res));
+    return nombre;
+  }
+
+  function refrescarGifTmp() {
+    const btn = document.getElementById('btnAgregarGifGaleria'), info = document.getElementById('infoGifTmp');
+    if (!gifTmp) { gifTmpRes = null; btn.disabled = true; info.textContent = 'Sin GIF cargado.'; return; }
+    const esCod = gifTmp.origen === 'codigo';
+    if (!esCod && gifTmp.geom !== claveGeometria(opcionesConv())) {   // cambio tamaño / fondo / giro / volteo: se reacomodan los cuadros
+      try { gifTmp = leerGifBuffer(gifTmp.buf, opcionesConv()); } catch (err) { document.getElementById('avisoGif').innerHTML = '<div class="aviso error">No se pudo reprocesar el GIF: ' + err.message + '</div>'; return; }
+    }
+    gifTmpRes = aGifFinal(gifTmp);
+    btn.disabled = false;
+    const unicos = new Set(gifTmpRes.frames).size;
+    info.textContent = resumenGif(gifTmpRes) + (unicos > MAX_FLASH_KB ? ' — ojo: puede no entrar en la memoria de programa del ESP8266; subí "1 de cada N cuadros"' : '') +
+      (esCod ? ' · el código ya viene en blanco y negro: las opciones de conversión no se aplican a este GIF' : '') +
+      (!esCod && gifTmpRes.frames.length > 1 && /^(floyd|atkinson)$/.test(opcionesConv().modo) ? ' · Tip: con este difuminado las zonas quietas del GIF titilan; probá Bayer o Solo umbral' : '');
+    info.style.color = unicos > MAX_FLASH_KB ? 'var(--warn)' : '';
+  }
+  let timerGif = null;
+  const refrescarGifTmpSuave = () => { clearTimeout(timerGif); timerGif = setTimeout(refrescarGifTmp, 40); };
+
+  async function manejarArchivoGif(file) {
+    if (!file) return;
+    const info = document.getElementById('infoGifTmp'), aviso = document.getElementById('avisoGif');
+    aviso.innerHTML = ''; info.textContent = 'Leyendo ' + file.name + '…';
+    try {
+      gifTmp = await leerGifArchivo(file);
+      const nom = document.getElementById('nombreGifTmp');
+      if (!nom.value) nom.value = nombreC(file.name.replace(/\.[^.]+$/, ''), 'gif');
+      document.getElementById('zonaCargaGif').textContent = 'Hacé clic o arrastrá otro .gif para reemplazarlo';
+      refrescarGifTmp();
+    } catch (err) {
+      gifTmp = null; refrescarGifTmp();
+      aviso.innerHTML = '<div class="aviso error">No se pudo leer el GIF: ' + err.message + '</div>';
+    }
+  }
+
+  // Busca cuadros de 128x64 (1024 bytes) en codigo C: arreglos de bytes tipo `const unsigned char nombre[] PROGMEM = {0x00, ...}`.
+  // Sirve la salida de image2cpp (varias imagenes) o un .ino cualquiera que ya tenga los cuadros. Mantiene el orden del texto.
+  function extraerCuadrosDeCodigo(texto) {
+    const src = quitarComentarios(texto);
+    const re = /\b(?:unsigned\s+char|uint8_t|byte)\s+(?:PROGMEM\s+)?([A-Za-z_]\w*)\s*(?:\[[^\]]*\]\s*)+(?:PROGMEM\s*)?=\s*\{([^}]*)\}/g;
+    const bitmaps = [], ignorados = []; let primero = null, m;
+    while ((m = re.exec(src)) !== null) {
+      const toks = m[2].split(',').map(s => s.trim()).filter(Boolean), bytes = new Uint8Array(toks.length); let ok = true;
+      for (let i = 0; i < toks.length && ok; i++) {
+        const t = toks[i]; let v = NaN;
+        if (/^0x[0-9a-f]{1,2}$/i.test(t)) v = parseInt(t, 16); else if (/^\d{1,3}$/.test(t)) v = parseInt(t, 10); else if (/^B[01]{1,8}$/.test(t)) v = parseInt(t.slice(1), 2);
+        if (!(v >= 0 && v <= 255)) ok = false; else bytes[i] = v;
+      }
+      if (!ok || bytes.length === 0) continue;                       // no es un arreglo de bytes (por ej. una tabla de punteros)
+      const por = ANCHO / 8 * ALTO;                                 // 1024 bytes por cuadro
+      if (bytes.length % por === 0) { for (let o = 0; o < bytes.length; o += por) bitmaps.push(bytes.slice(o, o + por)); if (!primero) primero = m[1]; }
+      else ignorados.push(m[1] + ' (' + bytes.length + ' bytes)');
+    }
+    if (bitmaps.length === 0) throw new Error('no encontré cuadros de 128×64 (1024 bytes cada uno)' + (ignorados.length ? '; los arreglos que vi tienen otro tamaño: ' + ignorados.slice(0, 3).join(', ') : ''));
+    const nombre = nombreC((primero || 'gif').replace(/^epd_bitmap_/, '').replace(/_?\d+$/, ''), 'gif');
+    return { bitmaps, ignorados, nombre };
+  }
+
+  document.getElementById('btnUsarCodigoGif').addEventListener('click', () => {
+    const aviso = document.getElementById('avisoGif');
+    try {
+      const r = extraerCuadrosDeCodigo(document.getElementById('pegarGif').value);
+      const ms = Math.max(20, parseInt(document.getElementById('gifMsCuadro').value, 10) || 100);
+      gifTmp = { origen: 'codigo', bitmaps: r.bitmaps, delays: r.bitmaps.map(() => ms) };
+      const nom = document.getElementById('nombreGifTmp'); if (!nom.value) nom.value = r.nombre;
+      refrescarGifTmp();
+      aviso.innerHTML = '<div class="aviso ok">Leí ' + r.bitmaps.length + (r.bitmaps.length === 1 ? ' cuadro' : ' cuadros') + ' de 128×64 a ' + ms + ' ms cada uno.' +
+        (r.ignorados.length ? ' Ignoré ' + r.ignorados.length + ' arreglo(s) de otro tamaño.' : '') + ' Revisá la vista previa y tocá "Agregar GIF a la galería".</div>';
+    } catch (err) { aviso.innerHTML = '<div class="aviso error">' + err.message + '</div>'; }
+  });
+
+  document.getElementById('zonaCargaGif').addEventListener('click', () => document.getElementById('fileGif').click());
+  document.getElementById('fileGif').addEventListener('change', (e) => { manejarArchivoGif(e.target.files[0]); e.target.value = ''; });
+  ['dragenter', 'dragover'].forEach(ev => document.getElementById('zonaCargaGif').addEventListener(ev, (e) => { e.preventDefault(); e.currentTarget.classList.add('sobre'); }));
+  ['dragleave', 'drop'].forEach(ev => document.getElementById('zonaCargaGif').addEventListener(ev, (e) => { e.preventDefault(); e.currentTarget.classList.remove('sobre'); }));
+  document.getElementById('zonaCargaGif').addEventListener('drop', (e) => manejarArchivoGif(e.dataTransfer.files[0]));
+  ['gifSalto', 'gifVel'].forEach(id => document.getElementById(id).addEventListener('input', refrescarGifTmpSuave));
+  document.getElementById('btnAgregarGifGaleria').addEventListener('click', () => {
+    if (!gifTmpRes) return;
+    const nombre = agregarGifAGaleria(gifTmpRes, document.getElementById('nombreGifTmp').value);
+    document.getElementById('nombreGifTmp').value = '';
+    renderGaleria(); renderEventos(); guardarProyectoActual();
+    document.getElementById('avisoGif').innerHTML = '<div class="aviso ok">Agregado: ' + nombre + '. Para usarlo andá a Eventos y tocá "+ Evento de GIF acá".</div>';
+  });
+
+  // "Subir GIF y usarlo acá": lo convierte con los controles de arriba, lo guarda en la galeria y lo pone como evento en la posicion actual
+  function avisoModoParcheGif() {
+    if (!escena.src) return false;
+    alert('Este proyecto está en modo parche (conserva tu .ino original), y ahí los GIF no se pueden exportar. Importá el .ino sin tildar "modo parche avanzado" para usar GIF.');
+    return true;
+  }
+  document.getElementById('btnSubirGifAca').onclick = () => { if (!avisoModoParcheGif()) document.getElementById('fileGifEvento').click(); };
+  document.getElementById('fileGifEvento').onchange = async (e) => {
+    const file = e.target.files[0]; e.target.value = ''; if (!file) return;
+    try {
+      const res = aGifFinal(await leerGifArchivo(file));
+      const nombre = agregarGifAGaleria(res, file.name.replace(/\.[^.]+$/, ''));
+      const ev = { nota: notaEnPosicion(posicionMs) ?? 0, ms: Math.round(posicionMs), tipo: 'gif', gif: nombre, loop: true };
+      escena.eventos.push(ev); renderGaleria(); renderEventos(); actualizarEnPosicion(posicionMs, false); guardarProyectoActual();
+    } catch (err) { alert('No se pudo leer el GIF: ' + err.message); }
+  };
+  document.getElementById('btnAgregarEventoGif').addEventListener('click', () => {
+    if (avisoModoParcheGif()) return;
+    const primera = Object.keys(GIFS())[0];
+    if (!primera) { document.getElementById('fileGifEvento').click(); return; }
+    escena.eventos.push({ nota: notaEnPosicion(posicionMs) ?? 0, ms: Math.round(posicionMs), tipo: 'gif', gif: primera, loop: true });
+    renderEventos(); actualizarEnPosicion(posicionMs, false);
+  });
+
+  // animacion de las miniaturas de la galeria y de la vista previa del conversor (solo si esa pestaña se ve)
+  const thumbsGif = [];
+  setInterval(() => {
+    if (document.getElementById('panelImagenes').style.display === 'none') return;
+    const t = performance.now();
+    if (gifTmpRes) dibujarGifEnCanvas(document.getElementById('previewGifTmp'), gifTmpRes, t);
+    thumbsGif.forEach(x => dibujarGifEnCanvas(x.canvas, x.gif, t));
+  }, 50);
+
+  // ==================== panel "Opciones de conversion": recordar, mostrar ayuda y reconvertir en vivo ====================
+  const AYUDA_DIF = {
+    floyd: 'Floyd–Steinberg: el mejor para fotos y degradados. En un GIF las zonas quietas pueden "titilar" un poco, porque el error se reparte distinto en cada cuadro.',
+    atkinson: 'Atkinson: más contraste y limpio que Floyd–Steinberg (pierde un poco de detalle en sombras y luces). Mismo detalle de titileo en GIF.',
+    bayer: 'Bayer: trama fija, no depende del cuadro anterior, así que las zonas quietas de un GIF no titilan y los cuadros iguales se funden (menos flash).',
+    umbral: 'Solo umbral: cada punto queda blanco o negro, sin tramas. Ideal para logos, íconos y dibujos de líneas.'
+  };
+  function guardarOpcionesConv() { try { const o = {}; IDS_CONV.forEach(id => { const e = document.getElementById(id); o[id] = e.type === 'checkbox' ? e.checked : e.value; }); localStorage.setItem(CLAVE_CONV, JSON.stringify(o)); } catch (e) {} }
+  function restaurarOpcionesConv() {
+    try {
+      const o = JSON.parse(localStorage.getItem(CLAVE_CONV)) || {};
+      IDS_CONV.forEach(id => { if (!(id in o)) return; const e = document.getElementById(id); if (e.type === 'checkbox') e.checked = !!o[id]; else e.value = o[id]; if (e.value !== String(o[id]) && e.type !== 'checkbox') e.selectedIndex = 0; });
+    } catch (e) {}
+    document.getElementById('convUmbralVal').textContent = document.getElementById('convUmbral').value;
+    document.getElementById('convAyuda').textContent = AYUDA_DIF[document.getElementById('convDifuminado').value];
+  }
+  function alCambiarOpcionesConv() {
+    document.getElementById('convUmbralVal').textContent = document.getElementById('convUmbral').value;
+    document.getElementById('convAyuda').textContent = AYUDA_DIF[document.getElementById('convDifuminado').value];
+    guardarOpcionesConv();
+    reprocesarPreviewTmp();       // la imagen suelta se reconvierte al instante
+    refrescarGifTmpSuave();       // el GIF, con un pequeño retardo (puede tener muchos cuadros)
+  }
+  IDS_CONV.forEach(id => { const e = document.getElementById(id); e.addEventListener(e.type === 'range' || e.type === 'checkbox' ? 'input' : 'change', alCambiarOpcionesConv); });
+  restaurarOpcionesConv();
 
   // ==================== tabs ====================
   document.getElementById('tabEventosBtn').addEventListener('click', () => {
@@ -1476,7 +2018,7 @@ function convertirInoAEscena(src, nombre) {
       if (nueva.notas.length === 0) throw new Error('No se encontraron notas — ¿es el .ino correcto?');
       const modoParche = document.getElementById('chkModoParche').checked;
       if (!modoParche) { nueva.eventos = []; nueva.meta = []; nueva.src = null; }
-      escena = nueva; escena.imagenes = escena.imagenes || {}; escena.retrasoMs = 0; escena.retrasoMp3Ms = 0;
+      escena = nueva; escena.imagenes = escena.imagenes || {}; escena.gifs = {}; escena.retrasoMs = 0; escena.retrasoMp3Ms = 0;
       recalcularTimeline(); renderEventos(); renderGaleria();
       posicionMs = 0; actualizarEnPosicion(0, false);
       document.getElementById('retrasoSeg').value = '';
@@ -1505,7 +2047,7 @@ function convertirInoAEscena(src, nombre) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), imagenes: data.imagenes || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0, retrasoMp3Ms: data.retrasoMp3Ms || 0 };
+        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), imagenes: data.imagenes || {}, gifs: data.gifs || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0, retrasoMp3Ms: data.retrasoMp3Ms || 0 };
         document.getElementById('inputNombreCancion').value = escena.nombre;
         recalcularTimeline(); renderEventos(); renderGaleria();
         posicionMs = 0; actualizarEnPosicion(0, false);
@@ -1596,7 +2138,9 @@ void muestra(){ display.display(); }
   document.getElementById('btnExportarIno').addEventListener('click', () => {
     if (escena.notas.length === 0) { alert('No hay ninguna canción cargada.'); return; }
     const nombreCancion = (document.getElementById('inputNombreCancion').value || 'cancion').replace(/[^a-zA-Z0-9_]/g, '_');
-    const ordenados = conFines([...escena.eventos].sort((a, b) => a.nota - b.nota));
+    const hayGifParche = escena.src && escena.eventos.some(e => e.tipo === 'gif');
+    const ordenados = conFines([...escena.eventos].filter(e => !(escena.src && e.tipo === 'gif')).sort((a, b) => a.nota - b.nota));
+    if (hayGifParche) alert('Este proyecto está en modo parche: los eventos de GIF no se exportan (se saltearon). Importá el .ino sin tildar "modo parche avanzado" para usar GIF.');
     if (escena.src) {
       let patched = parchearIno(escena.src, ordenados);
       if (escena.retrasoMs > 0) {
@@ -1615,11 +2159,62 @@ void muestra(){ display.display(); }
     esc.sort((a, b) => a.t - b.t);
     const lin = (ev) => ev.lineas.filter(l => l.t);
     const maxL = Math.max(1, ...esc.map(x => x.ev && x.ev.tipo === 'texto' ? lin(x.ev).length : 0));
+    // ---- GIF: cada GIF usado se exporta una sola vez (los cuadros repetidos comparten arreglo) y la escena apunta a su "Anim" ----
+    const gifOk = (ev) => ev && ev.tipo === 'gif' && GIFS()[ev.gif] && GIFS()[ev.gif].frames.length > 0;
+    const nomAnim = (ev) => 'anim_' + ev.gif + (ev.loop !== false ? '' : '_una');
+    const variantes = new Map();
+    ord0.filter(gifOk).forEach(ev => variantes.set(nomAnim(ev), { gif: ev.gif, repetir: ev.loop !== false }));
+    const sA = variantes.size > 0;           // false = no hay GIF: el .ino sale exactamente como siempre
+    const NA = sA ? 'NULL, ' : '';
+    const dem = (d) => Math.max(1, Math.min(65535, Math.round(d)));
+    const listaEnFilas = (arr, n) => { const f = []; for (let i = 0; i < arr.length; i += n) f.push('  ' + arr.slice(i, i + n).join(', ')); return f.join(',\n'); };
+    let framesGifs = '', tablasAnim = '';
+    [...new Set([...variantes.values()].map(v => v.gif))].forEach(n => {
+      const g = GIFS()[n], tot = g.frames.length, unicos = new Map();
+      g.frames.forEach(f => { if (!unicos.has(f)) unicos.set(f, nombreCuadro(n, unicos.size + 1, tot)); });
+      framesGifs += `// GIF "${n}": ${tot} cuadros (${unicos.size} distintos)\n`;
+      unicos.forEach((nom, f) => { framesGifs += bytesAProgmem(b64ABytes(f), nom) + '\n'; });
+      tablasAnim += `const uint8_t* const ${n}_cuadros[] = {\n${listaEnFilas(g.frames.map(f => unicos.get(f)), 8)}\n};\n`;
+      tablasAnim += `const uint16_t ${n}_demoras[] = {\n${listaEnFilas(g.delays.map(dem), 16)}\n};\n`;
+    });
+    variantes.forEach((v, an) => {
+      const g = GIFS()[v.gif];
+      tablasAnim += `const Anim ${an} = { ${v.gif}_cuadros, ${v.gif}_demoras, ${g.frames.length}, ${v.repetir}, ${g.delays.reduce((a, d) => a + dem(d), 0)} };\n`;
+    });
+    if (tablasAnim) tablasAnim += '\n';
+    const comentEsc = sA ? '// { t_ms, imagen o NULL, GIF (Anim) o NULL, cantidad de renglones, { {tam, x, y, "texto"}, ... } }   (0 renglones = pantalla en blanco)'
+                         : '// { t_ms, imagen o NULL, cantidad de renglones, { {tam, x, y, "texto"}, ... } }   (0 renglones = pantalla en blanco)';
+    const defAnim = sA ? 'struct Anim   { const uint8_t* const* cuadros; const uint16_t* demoras; uint16_t n; bool repetir; unsigned long total; };   // un GIF: cuadros, ms de cada uno, cantidad, si repite, ms por vuelta\n' : '';
+    const campoAnim = sA ? 'const Anim* anim; ' : '';
+    const globAnim = sA ? '\n// GIF en curso: cual es, desde que ms de la melodia arranco, que cuadro se ve y cuando toca el siguiente\nconst Anim* animAct = NULL;\nunsigned long animT = 0, animProx = 0;\nint animCuadro = -1;\n' : '';
+    const funcAnim = sA ? `// Dibuja el cuadro del GIF que toca segun el reloj. Va por tiempo, no por cuenta: si un cuadro tarda en dibujarse, salta al que corresponde.
+void revisaAnim() {
+  if (!animAct) return;
+  unsigned long dt = (millis() - t0) - animT;           // ms desde que arranco el GIF
+  if (dt < animProx) return;                            // todavia no toca cambiar de cuadro
+  unsigned long base = 0;
+  if (animAct->repetir) { base = dt - dt % animAct->total; dt -= base; }   // vuelve a empezar al terminar
+  uint16_t k = 0; unsigned long acc = 0;
+  while (k < animAct->n - 1 && dt >= acc + animAct->demoras[k]) { acc += animAct->demoras[k]; k++; }
+  animProx = (!animAct->repetir && k == animAct->n - 1) ? 0xFFFFFFFF : base + acc + animAct->demoras[k];   // sin repetir: se queda en el ultimo
+  if (k != animCuadro) {
+    animCuadro = k;
+    display.clearDisplay();
+    display.drawBitmap(0, 0, animAct->cuadros[k], ANCHO, ALTO, WHITE);
+    display.display();
+  }
+}
+
+` : '';
+    const iniDibuja = sA ? '  animAct = e.anim; animT = e.t; animProx = 0; animCuadro = -1;\n  if (e.anim) { revisaAnim(); return; }\n' : '';
+    const llamaAnim = sA ? '  revisaAnim();\n' : '';
+    const resetLoop = sA ? '  animAct = NULL;\n' : '';
     const filasEsc = esc.map(({ t, ev }) => {
-      if (!ev) return `  { ${t}, NULL, 0, {} },`;
-      if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, 0, {} },`;
+      if (!ev || (ev.tipo === 'gif' && !gifOk(ev))) return `  { ${t}, NULL, ${NA}0, {} },`;
+      if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, ${NA}0, {} },`;
+      if (ev.tipo === 'gif') return `  { ${t}, NULL, &${nomAnim(ev)}, 0, {} },`;
       const ls = lin(ev);
-      return `  { ${t}, NULL, ${ls.length}, { ${ls.map(l => `{${l.tam}, ${posX(l)}, ${posY(l)}, ${JSON.stringify(txtOled(l.t))}}`).join(', ')} } },`;
+      return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => `{${l.tam}, ${posX(l)}, ${posY(l)}, ${JSON.stringify(txtOled(l.t))}}`).join(', ')} } },`;
     }).join('\n');
     const filasNotas = [];
     const notasExport = (escena.retrasoMs > 0) ? [[0, escena.retrasoMs], ...escena.notas] : escena.notas;
@@ -1638,28 +2233,28 @@ Adafruit_SSD1306 display(ANCHO, ALTO, &Wire, -1);
 
 const int pinBuzzer = 4; // GPIO4 / D2
 
-${imagenesUsadas(ord0, '')}// ===== Melodia: {frecuencia Hz (0 = silencio), duracion ms} =====
+${imagenesUsadas(ord0, '')}${framesGifs}// ===== Melodia: {frecuencia Hz (0 = silencio), duracion ms} =====
 const int melodia[][2] = {
 ${filasNotas.join('\n')}
 };
 const int N_NOTAS = sizeof(melodia) / sizeof(melodia[0]);
 
 // ===== Pantalla: cada escena sale en el ms indicado (t), contado desde el inicio de la melodia =====
-// { t_ms, imagen o NULL, cantidad de renglones, { {tam, x, y, "texto"}, ... } }   (0 renglones = pantalla en blanco)
+${comentEsc}
 #define MAXL ${maxL}
 struct Linea  { byte tam; byte x; byte y; const char* txt; };
-struct Escena { unsigned long t; const uint8_t* img; byte n; Linea l[MAXL]; };
+${defAnim}struct Escena { unsigned long t; const uint8_t* img; ${campoAnim}byte n; Linea l[MAXL]; };
 
-const Escena escenas[] = {
+${tablasAnim}const Escena escenas[] = {
 ${filasEsc}
-  { 0xFFFFFFFF, NULL, 0, {} }   // fin de la lista
+  { 0xFFFFFFFF, NULL, ${NA}0, {} }   // fin de la lista
 };
 
 unsigned long t0, tFin;   // t0 = inicio de la melodia, tFin = instante en que termina la nota actual
 int iEsc = 0;
-
-void dibujaEscena(const Escena& e) {
-  display.clearDisplay();
+${globAnim}
+${funcAnim}void dibujaEscena(const Escena& e) {
+${iniDibuja}  display.clearDisplay();
   if (e.img) display.drawBitmap(0, 0, e.img, ANCHO, ALTO, WHITE);
   for (int i = 0; i < e.n; i++) {
     display.setTextSize(e.l[i].tam);
@@ -1672,7 +2267,7 @@ void dibujaEscena(const Escena& e) {
 
 void revisaPantalla() {
   while (escenas[iEsc].t != 0xFFFFFFFF && millis() - t0 >= escenas[iEsc].t) dibujaEscena(escenas[iEsc++]);
-}
+${llamaAnim}}
 
 // Espera hasta el instante t (ms) sin dejar de atender la pantalla
 void esperaHasta(unsigned long t) {
@@ -1698,7 +2293,7 @@ void setup() {
 
 void loop() {
   iEsc = 0;
-  display.clearDisplay();
+${resetLoop}  display.clearDisplay();
   display.display();
   t0 = tFin = millis();
   for (int i = 0; i < N_NOTAS; i++) paso(melodia[i][0], melodia[i][1]);
@@ -1714,8 +2309,8 @@ void loop() {
   // agrupando lo que se hace seguido (escribir, arrastrar un slider) como un único movimiento.
   const hist = { pila: [], pos: -1 };
   let escenaRef = escena, firmaVista = '', firmaEstable = '';
-  const foto = () => JSON.stringify({ e: escena.eventos, i: escena.imagenes });
-  const firma = () => JSON.stringify(escena.eventos) + Object.keys(escena.imagenes).join(',');
+  const foto = () => JSON.stringify({ e: escena.eventos, i: escena.imagenes, g: GIFS() });
+  const firma = () => JSON.stringify(escena.eventos) + Object.keys(escena.imagenes).join(',') + '|' + Object.keys(GIFS()).join(',');
   function botonesHist() {
     const u = document.getElementById('btnDeshacer'), r = document.getElementById('btnRehacer');
     u.disabled = hist.pos <= 0; r.disabled = hist.pos >= hist.pila.length - 1;
@@ -1733,7 +2328,7 @@ void loop() {
     guardarCambio();
     if (i < 0 || i >= hist.pila.length) return;
     const d = JSON.parse(hist.pila[i]);
-    escena.eventos = d.e.map(migrar); escena.imagenes = d.i; hist.pos = i;
+    escena.eventos = d.e.map(migrar); escena.imagenes = d.i; escena.gifs = d.g || {}; hist.pos = i;
     firmaVista = firmaEstable = firma();
     renderEventos(); renderGaleria(); actualizarEnPosicion(posicionMs, false); botonesHist();
   }
