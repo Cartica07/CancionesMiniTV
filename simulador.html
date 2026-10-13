@@ -436,22 +436,23 @@
 0,0,255,1,3,224,128,255,0,0,8,8,107,107,8,54,18,54,36,54,
 6,15,9,15,6,0,0,24,24,0,0,0,16,16,0,48,64,255,1,1,
 0,31,1,1,30,0,25,29,23,18,0,60,60,60,60,0,0,0,0,0]);
-  function dibujarCaracterGlcd(ctx, codigo, x, y, tam) {
+  function dibujarCaracterGlcd(ctx, codigo, x, y, k) {     // k = tamaño en cuartos (4 = 1x, 6 = 1.5x, 8 = 2x)
     const offset = codigo * 5;
     for (let col = 0; col < 5; col++) {
       const columna = TABLA_FUENTE_GLCD[offset + col] || 0;
-      for (let fila = 0; fila < 7; fila++) {
-        if (columna & (1 << fila)) ctx.fillRect(x + col * tam, y + fila * tam, tam, tam);
+      const x0 = x + Math.floor(col * k / 4), x1 = x + Math.floor((col + 1) * k / 4);
+      for (let fila = 0; fila < 8; fila++) {      // 8 filas: las letras con cola (p, q, g, y) usan la ultima
+        if (columna & (1 << fila)) { const y0 = y + Math.floor(fila * k / 4), y1 = y + Math.floor((fila + 1) * k / 4); ctx.fillRect(x0, y0, x1 - x0, y1 - y0); }
       }
     }
   }
-  function dibujarTextoGlcd(ctx, texto, tam, x, y) {
+  function dibujarTextoGlcd(ctx, texto, k, sep, x, y) {
     let cx = x;
     for (const ch of texto) {
       let codigo = ch.codePointAt(0);
       if (codigo > 255) codigo = 63;
-      dibujarCaracterGlcd(ctx, codigo, cx, y, tam);
-      cx += 6 * tam;
+      dibujarCaracterGlcd(ctx, codigo, cx, y, k);
+      cx += Math.floor(5 * k / 4) + sep;
     }
   }
 
@@ -551,7 +552,7 @@
 
   // ---- modelo de texto: cada linea = {t, tam, x, y, ah, av}; ah/av = izq|centro|der|libre y arriba|centro|abajo|libre ----
   const L = (t, tam, x, y) => ({ t, tam, x, y, ah: 'libre', av: 'libre' });
-  const nuevaLinea = (t, tam, ah, av) => ({ t, tam, x: 0, y: 0, ah, av });
+  const nuevaLinea = (t, tam, ah, av) => ({ t, tam, x: 0, y: 0, ah, av, auto: true, tamPref: tam });   // las lineas nuevas se ajustan solas al ancho
   // ---- Texto para la OLED ----
   // La fuente de Adafruit_GFX es CP437: 1 byte por caracter (no UTF-8). Sus codigos 0x80-0xAF incluyen ñ Ñ ¿ ¡ á é í ó ú ü É y otras,
   // asi que se imprimen como texto normal, sin hacer una imagen por palabra. Lo que la fuente no tiene (Á Í Ó Ú ã...) pierde la tilde.
@@ -581,9 +582,66 @@
     });
     return raros.length ? 'La fuente de la OLED no tiene: ' + raros.join(', ') + '. Sí tiene ñ Ñ ¿ ¡ á é í ó ú ü É.' : '';
   }
-  const anchoTxt = (l) => Math.max(0, txtOled(l.t).length * 6 * l.tam - l.tam);
+  // ---- Tamaños con coma, letras juntas y ajuste al ancho ----
+  // Adafruit_GFX solo escala el texto en enteros (1x, 2x, 3x...), y entre 1x y 2x hay un salto grande: una palabra de 11 letras ya no
+  // entra en 2x (130 puntos de 128) y en 1x queda minuscula. Por eso el .ino puede usar una funcion propia (textoEsc) que dibuja la
+  // misma fuente 5x7 con rectangulos, en cualquier tamaño (1.5x, 2.5x...) y con las letras mas juntas. Los tamaños enteros con
+  // espaciado normal siguen usando setTextSize (como siempre) y el .ino no cambia si no se usa nada de esto.
+  const TAMS = [1, 1.5, 2, 2.5, 3, 4, 5];
+  const kDe = (tam) => Math.round(tam * 4);                          // tamaño en cuartos: 4 = 1x, 6 = 1.5x, 8 = 2x
+  const kLinea = (l) => kDe(l.tam);
+  const anchoGlifoK = (k) => Math.floor(5 * k / 4);                  // ancho de la letra (las 5 columnas)
+  const sepK = (k, junto) => junto ? 1 : Math.floor(6 * k / 4) - anchoGlifoK(k);   // normal = lo mismo que Adafruit (1 punto x tamaño)
+  const sepLinea = (l) => sepK(kLinea(l), l.junto);
+  const esEsc = (l) => !Number.isInteger(l.tam) || (!!l.junto && l.tam > 1);       // true = se dibuja con textoEsc
+  const anchoTxtN = (n, tam, junto) => { const k = kDe(tam), s = sepK(k, junto); return Math.max(0, n * (anchoGlifoK(k) + s) - s); };
+  const anchoTxt = (l) => anchoTxtN(txtOled(l.t).length, l.tam, l.junto);
+  const altoLinea = (l) => Math.floor(8 * kLinea(l) / 4);            // alto de la celda: 8 filas de la fuente, escaladas
+  // Del tamaño elegido para abajo, el mas grande que cabe en el ancho de la pantalla: primero con espaciado normal y, si no, con letras juntas
+  function autoTam(t, pref) {
+    const n = txtOled(t).length;
+    if (n === 0) return { tam: pref, junto: false };
+    for (const tam of TAMS.filter(v => v <= pref).reverse()) {
+      if (anchoTxtN(n, tam, false) <= ANCHO) return { tam, junto: false };
+      if (tam > 1 && anchoTxtN(n, tam, true) <= ANCHO) return { tam, junto: true };
+    }
+    return { tam: 1, junto: false };
+  }
+  // Codigo de C de textoEsc + los glifos que usan las lineas dadas (se copian de la fuente real, solo los necesarios)
+  function bloqueEsc(lineas) {
+    const hex = (b) => '0x' + b.toString(16).toUpperCase().padStart(2, '0');
+    const codigos = [...new Set(lineas.flatMap(l => Array.from(txtOled(l.t)).map(ch => ch.charCodeAt(0))))].filter(c => c !== 0x20).sort((a, b) => a - b);
+    const fila = (c) => '  { ' + hex(c) + ', ' + Array.from(TABLA_FUENTE_GLCD.slice(c * 5, c * 5 + 5)).map(hex).join(', ') + ' },' + (/[A-Za-z0-9]/.test(String.fromCharCode(c)) ? '   // ' + String.fromCharCode(c) : '');
+    return `// ===== Texto con tamano intermedio o letras juntas =====
+// Glifos 5x7 de la fuente de la OLED (solo los que se usan): { codigo, 5 columnas (el bit 0 es la fila de arriba) }
+const uint8_t glifos[][6] PROGMEM = {
+${codigos.map(fila).join('\n')}
+};
+const int N_GLIFOS = sizeof(glifos) / sizeof(glifos[0]);
+
+// Dibuja texto 5x7 con rectangulos: k = tamano en cuartos (4 = 1x, 6 = 1.5x, 8 = 2x), sep = puntos entre letras.
+void textoEsc(int k, int sep, int x, int y, const char* t) {
+  for (; *t; t++) {
+    for (int g = 0; g < N_GLIFOS; g++) {
+      if (pgm_read_byte(&glifos[g][0]) != (uint8_t)*t) continue;
+      for (int col = 0; col < 5; col++) {
+        uint8_t bits = pgm_read_byte(&glifos[g][1 + col]);
+        for (int fila = 0; fila < 8; fila++) {
+          if (!(bits & (1 << fila))) continue;
+          int x0 = x + col * k / 4, x1 = x + (col + 1) * k / 4, y0 = y + fila * k / 4, y1 = y + (fila + 1) * k / 4;
+          display.fillRect(x0, y0, x1 - x0, y1 - y0, WHITE);
+        }
+      }
+      break;
+    }
+    x += 5 * k / 4 + sep;
+  }
+}
+
+`;
+  }
   function posX(l) { const w = anchoTxt(l); if (l.ah === 'izq') return 0; if (l.ah === 'centro') return Math.max(0, Math.round((ANCHO - w) / 2)); if (l.ah === 'der') return Math.max(0, ANCHO - w); return Math.max(0, Math.min(l.x, ANCHO - w)); }
-  function posY(l) { const h = 8 * l.tam; if (l.av === 'arriba') return 0; if (l.av === 'centro') return Math.max(0, Math.round((ALTO - h) / 2)); if (l.av === 'abajo') return Math.max(0, ALTO - h); return Math.max(0, Math.min(l.y, ALTO - h)); }
+  function posY(l) { const h = altoLinea(l); if (l.av === 'arriba') return 0; if (l.av === 'centro') return Math.max(0, Math.round((ALTO - h) / 2)); if (l.av === 'abajo') return Math.max(0, ALTO - h); return Math.max(0, Math.min(l.y, ALTO - h)); }
   function migrar(ev) {
     if (ev.tipo === 'texto' && !ev.lineas) {
       ev.lineas = [];
@@ -819,6 +877,7 @@ class Interprete {
           }
           if (nombre === 'borra') { this.pend = { lineas: [] }; return; }
           if (nombre === 'linea') { if (!this.pend) this.pend = { lineas: this.ultimasLineas() }; this.pend.lineas.push(L(s[0] || '', num(0), num(1), num(2))); return; }
+          if (nombre === 'textoEsc') { if (!this.pend) this.pend = { lineas: this.ultimasLineas() }; const ln = L(s[0] || '', num(0) / 4, num(2), num(3)); if (num(1) === 1) ln.junto = true; this.pend.lineas.push(ln); return; }
           if (nombre === 'muestra') { if (this.pend) this.eventos.push({ nota: this.notas.length, tipo: 'texto', lineas: this.pend.lineas }); this.pend = null; return; }
           if (nombre === 'letra' || nombre === 'agrega') {
             const conTam = !/^\s*"/.test(args[0]);
@@ -1416,7 +1475,7 @@ function convertirInoAEscena(src, nombre) {
       ctx.fillStyle = '#7fffe0';
       (evento.lineas || []).forEach(l => {
         const x = posX(l), y = posY(l);
-        dibujarTextoGlcd(ctx, txtOled(l.t), l.tam, x, y);
+        dibujarTextoGlcd(ctx, txtOled(l.t), kLinea(l), sepLinea(l), x, y);
       });
     } else if (evento.tipo === 'imagen') {
       const img = escena.imagenes[evento.imagen];
@@ -1560,26 +1619,45 @@ function convertirInoAEscena(src, nombre) {
       // El maximo real de X/Y depende del ancho/alto del texto actual (tamano y letras):
       // nunca se deja guardada ni arrastrar una posicion que saque el texto de la pantalla.
       const maxX = () => Math.max(0, ANCHO - anchoTxt(l));
-      const maxY = () => Math.max(0, ALTO - 8 * l.tam);
+      const maxY = () => Math.max(0, ALTO - altoLinea(l));
       const pintar = () => { l.x = Math.min(l.x, maxX()); l.y = Math.min(l.y, maxY()); sx.max = maxX(); sy.max = maxY(); sx.value = posX(l); vx.textContent = posX(l); sy.value = posY(l); vy.textContent = posY(l); };
       const sync = () => { pintar(); ver(ev); };
       const txt = el('input', { type: 'text', value: l.t, placeholder: 'texto (la ñ y las tildes ya funcionan)' });
       const avisoCh = el('div', { className: 'aviso-char' });
-      const pintarAviso = () => { const a = avisoChars(l.t); avisoCh.textContent = a; avisoCh.style.display = a ? '' : 'none'; };
+      const pintarAviso = () => {
+        const partes = [avisoChars(l.t)];
+        if (anchoTxt(l) > ANCHO) partes.push(l.auto || l.tam <= 1 ? 'No entra en una línea ni en el tamaño más chico (máx. 21 letras): partilo en dos líneas.' : 'No entra en el ancho con este tamaño: activá "Ajustar al ancho" o partilo en dos líneas.');
+        const a = partes.filter(Boolean).join(' ');
+        avisoCh.textContent = a; avisoCh.style.display = a ? '' : 'none';
+      };
       pintarAviso();
-      txt.oninput = () => { l.t = txt.value; pintarAviso(); sync(); };
-      const tam = sel([[1, 'Tam 1'], [2, 'Tam 2'], [3, 'Tam 3'], [4, 'Tam 4'], [5, 'Tam 5']], l.tam, v => { l.tam = +v; sync(); });
+      txt.oninput = () => { l.t = txt.value; aplicar(); sync(); };
+      const tam = sel(TAMS.map(v => [v, 'Tam ' + v]), l.tam, v => { l.tam = +v; l.tamPref = +v; aplicar(); sync(); });
+      const chkAuto = el('input', { type: 'checkbox', checked: !!l.auto }), chkJunto = el('input', { type: 'checkbox', checked: !!l.junto });
+      // con "ajustar al ancho" el tamaño elegido es el maximo: si el texto no cabe se achica solo (y se juntan las letras si hace falta)
+      const aplicar = () => {
+        if (l.auto) { const r = autoTam(l.t, l.tamPref || l.tam); l.tam = r.tam; l.junto = r.junto; }
+        tam.value = String(l.tam); chkJunto.checked = !!l.junto; chkJunto.disabled = !!l.auto;
+        pintarAviso();
+      };
+      chkAuto.onchange = () => { l.auto = chkAuto.checked; if (l.auto) l.tamPref = l.tam; aplicar(); sync(); };
+      chkJunto.onchange = () => { l.junto = chkJunto.checked; sync(); };
+      const filaTam = el('div', { className: 'fila' }, [
+        el('label', { className: 'chk-adv', title: 'Si el texto no entra en los 128 puntos de la pantalla, usa el tamaño intermedio o las letras juntas que haga falta (nunca más grande que el tamaño elegido)' }, [chkAuto, el('span', { textContent: 'Ajustar al ancho' })]),
+        el('label', { className: 'chk-adv', title: 'Menos espacio entre letras: caben más en la misma línea' }, [chkJunto, el('span', { textContent: 'Letras juntas' })])]);
       const selH = sel([['izq', '◀ Izquierda'], ['centro', '⬌ Centrado'], ['der', 'Derecha ▶'], ['libre', 'Libre']], l.ah, v => { if (v === 'libre') l.x = posX(l); l.ah = v; sync(); });
       const selV = sel([['arriba', '▲ Arriba'], ['centro', '⬍ Centro'], ['abajo', '▼ Abajo'], ['libre', 'Libre']], l.av, v => { if (v === 'libre') l.y = posY(l); l.av = v; sync(); });
       sx.oninput = () => { l.x = Math.min(+sx.value, maxX()); l.ah = 'libre'; selH.value = 'libre'; sync(); };
       sy.oninput = () => { l.y = Math.min(+sy.value, maxY()); l.av = 'libre'; selV.value = 'libre'; sync(); };
       const del = el('button', { className: 'chico peligro', textContent: '✕' });
       del.onclick = () => { ev.lineas.splice(ev.lineas.indexOf(l), 1); renderEventos(); ver(ev); };
+      aplicar();
       pintar();
       caja.appendChild(el('div', { className: 'linea-ed' }, [
         el('div', { className: 'fila' }, [txt, tam, del]),
         avisoCh,
         el('div', { className: 'fila' }, [selH, selV]),
+        filaTam,
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'X' }), sx, vx]),
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'Y' }), sy, vy])]));
     });
@@ -2127,7 +2205,7 @@ void muestra(){ display.display(); }
     if (ev.tipo === 'fin') return '  borra();\n  muestra();\n';
     if (ev.tipo === 'imagen') return `  borra();\n  display.drawBitmap(0, 0, ${ev.imagen}, ${ANCHO}, ${ALTO}, WHITE);\n  muestra();\n`;
     let c = '  borra();\n';
-    ev.lineas.forEach(l => { if (l.t) c += `  linea(${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
+    ev.lineas.forEach(l => { if (l.t) c += esEsc(l) ? `  textoEsc(${kLinea(l)}, ${sepLinea(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n` : `  linea(${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
     return c + '  muestra();\n';
   }
   function imagenesUsadas(ordenados, yaEn) {
@@ -2152,13 +2230,14 @@ void muestra(){ display.display(); }
       if (!funcs[g]) return;
       let k = 0; const nuevas = [];
       funcs[g].cuerpo.split('\n').forEach(l => {
-        if (/^\s*(letra|agrega|borra|linea|muestra)\s*\(/.test(l)) return;
+        if (/^\s*(letra|agrega|borra|linea|textoEsc|muestra)\s*\(/.test(l)) return;
         if (/^\s*notaL?\s*\(/.test(l)) { ((porG[g] || {})[k] || []).forEach(ev => nuevas.push(codigoEvento(ev).replace(/\n$/, ''))); k++; }
         nuevas.push(l);
       });
       out = out.replace(funcs[g].cuerpo, () => nuevas.join('\n'));
     });
-    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS);
+    const lEsc = ordenados.filter(e => e.tipo === 'texto').flatMap(e => e.lineas.filter(l => l.t && esEsc(l)));
+    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS) + (lEsc.length ? bloqueEsc(lEsc) : '');
     if (extra) out = out.replace(/void\s+setup\s*\(/, m => extra + m);
     if (omitidos) alert(omitidos + ' evento(s) no se pudieron ubicar dentro de una función (¿función repetida en loop?) y quedaron fuera.');
     return out;
@@ -2242,12 +2321,20 @@ void revisaAnim() {
     const iniDibuja = sA ? '  animAct = e.anim; animT = e.t; animProx = 0; animCuadro = -1;\n  if (e.anim) { revisaAnim(); return; }\n' : '';
     const llamaAnim = sA ? '  revisaAnim();\n' : '';
     const resetLoop = sA ? '  animAct = NULL;\n' : '';
+    // ---- texto con tamaño intermedio o letras juntas: Linea gana k y sep (k = 0 -> texto normal con setTextSize) ----
+    const lineasEsc = ord0.filter(e => e.tipo === 'texto').flatMap(e => lin(e)).filter(esEsc);
+    const usaEsc = lineasEsc.length > 0;      // false = ni una linea lo usa: el .ino sale exactamente como siempre
+    const itemLinea = (l) => esEsc(l) ? `{0, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))}, ${kLinea(l)}, ${sepLinea(l)}}`
+                                      : `{${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))}${usaEsc ? ', 0, 0' : ''}}`;
+    const campoEsc = usaEsc ? ' byte k; byte sep;' : '';
+    const funcEsc = usaEsc ? bloqueEsc(lineasEsc) : '';
+    const saltoEsc = usaEsc ? '    if (e.l[i].k) { textoEsc(e.l[i].k, e.l[i].sep, e.l[i].x, e.l[i].y, e.l[i].txt); continue; }\n' : '';
     const filasEsc = esc.map(({ t, ev }) => {
       if (!ev || (ev.tipo === 'gif' && !gifOk(ev))) return `  { ${t}, NULL, ${NA}0, {} },`;
       if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, ${NA}0, {} },`;
       if (ev.tipo === 'gif') return `  { ${t}, NULL, &${nomAnim(ev)}, 0, {} },`;
       const ls = lin(ev);
-      return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => `{${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))}}`).join(', ')} } },`;
+      return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => itemLinea(l)).join(', ')} } },`;
     }).join('\n');
     const filasNotas = [];
     const notasExport = (escena.retrasoMs > 0) ? [[0, escena.retrasoMs], ...escena.notas] : escena.notas;
@@ -2275,7 +2362,7 @@ const int N_NOTAS = sizeof(melodia) / sizeof(melodia[0]);
 // ===== Pantalla: cada escena sale en el ms indicado (t), contado desde el inicio de la melodia =====
 ${comentEsc}
 #define MAXL ${maxL}
-struct Linea  { byte tam; byte x; byte y; const char* txt; };
+struct Linea  { byte tam; byte x; byte y; const char* txt;${campoEsc} };
 ${defAnim}struct Escena { unsigned long t; const uint8_t* img; ${campoAnim}byte n; Linea l[MAXL]; };
 
 ${tablasAnim}const Escena escenas[] = {
@@ -2286,11 +2373,11 @@ ${filasEsc}
 unsigned long t0, tFin;   // t0 = inicio de la melodia, tFin = instante en que termina la nota actual
 int iEsc = 0;
 ${globAnim}
-${funcAnim}void dibujaEscena(const Escena& e) {
+${funcEsc}${funcAnim}void dibujaEscena(const Escena& e) {
 ${iniDibuja}  display.clearDisplay();
   if (e.img) display.drawBitmap(0, 0, e.img, ANCHO, ALTO, WHITE);
   for (int i = 0; i < e.n; i++) {
-    display.setTextSize(e.l[i].tam);
+${saltoEsc}    display.setTextSize(e.l[i].tam);
     display.setTextColor(WHITE);
     display.setCursor(e.l[i].x, e.l[i].y);
     display.println(e.l[i].txt);
