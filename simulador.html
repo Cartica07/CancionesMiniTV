@@ -365,6 +365,7 @@
   </div>
 </div>
 
+<script src="fuentes.js"></script>
 <script>
 (function () {
   const ANCHO = 128, ALTO = 64;
@@ -574,23 +575,167 @@
     return c >= 0x20 && c <= 0x7e ? ch : '\\' + c.toString(8).padStart(3, '0');
   }).join('') + '"';
   // Caracteres escritos que la OLED no tiene (se ven sin tilde o como '?')
-  function avisoChars(t) {
+  function avisoChars(t, fnt) {       // fnt = la linea usa una de las fuentes de fuentes.js (otro juego de caracteres)
     const raros = [];
     Array.from(new Set(Array.from((t || '').normalize('NFC')))).forEach(ch => {
-      if (CP437_ALTO.includes(ch)) return;
-      const r = txtOled(ch);
+      if (fnt ? FNT_IDX.has(ch.codePointAt(0)) : CP437_ALTO.includes(ch)) return;
+      const r = fnt ? txtFnt(ch) : txtOled(ch);
       if (r !== ch) raros.push(ch + ' (se verá ' + r + ')');
     });
-    return raros.length ? 'La fuente de la OLED no tiene: ' + raros.join(', ') + '. Sí tiene ñ Ñ ¿ ¡ á é í ó ú ü É.' : '';
+    if (!raros.length) return '';
+    return fnt ? 'La fuente elegida no tiene: ' + raros.join(', ') + '.' : 'La fuente de la OLED no tiene: ' + raros.join(', ') + '. Sí tiene ñ Ñ ¿ ¡ á é í ó ú ü É.';
   }
   // ---- Tamaños con coma, letras juntas y ajuste al ancho ----
   // Adafruit_GFX solo escala el texto en enteros (1x, 2x, 3x...), y entre 1x y 2x hay un salto grande: una palabra de 11 letras ya no
   // entra en 2x (130 puntos de 128) y en 1x queda minuscula. Por eso el .ino puede usar una funcion propia (textoEsc) que dibuja la
   // misma fuente 5x7 con rectangulos, en cualquier tamaño (1.5x, 2.5x...) y con las letras mas juntas. Los tamaños enteros con
   // espaciado normal siguen usando setTextSize (como siempre) y el .ino no cambia si no se usa nada de esto.
+
+  // ==================== Fuentes de ancho variable (archivo fuentes.js) ====================
+  // FreeSans (regular y negrita) y FreeSerif (regular y cursiva) en formato GFXfont de Adafruit_GFX, con ñ, tildes y demas letras Latin-1.
+  // Son opcionales: si fuentes.js no esta junto a simulador.html, todo sigue funcionando con la fuente 5x7. A diferencia de la 5x7, cada
+  // letra tiene su propio ancho y el texto se ubica por la "linea base"; los tamaños son fijos (en pt) y "Ajustar al ancho" elige entre ellos.
+  const FNT = window.FUENTES_OLED || null;
+  const FNT_COD = FNT ? FNT.codigos : [];
+  const FNT_IDX = new Map(FNT_COD.map((c, i) => [c, i]));
+  const NOMBRES_FNT = FNT ? Object.keys(FNT.fuentes) : [];
+  const MAX_APRETAR8 = 4;                                    // "letras juntas" aprieta como mucho 0.5 punto entre letras (en 1/8 de punto)
+  const tamsFnt = (id) => Object.keys(FNT.fuentes[id].tamanos).map(Number).sort((a, b) => a - b);
+  const esFnt = (l) => !!(l.fuente && FNT && FNT.fuentes[l.fuente] && FNT.fuentes[l.fuente].tamanos[l.tam]);
+  const fuenteFaltante = (l) => !!(l.fuente && !esFnt(l));     // la linea pide una fuente que no esta disponible: se usa la 5x7
+  const tamEf = (l) => fuenteFaltante(l) ? 1 : l.tam;
+  const nombreFnt = (l) => 'fnt_' + l.fuente + '_' + l.tam;
+
+  // Texto -> codigos Latin-1 que la fuente tiene (lo que no tiene pierde la tilde o pasa a '?')
+  const txtFnt = (t) => Array.from((t || '').normalize('NFC')).map(ch => {
+    if (FNT_IDX.has(ch.codePointAt(0))) return ch;
+    const base = ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return base.length === 1 && FNT_IDX.has(base.codePointAt(0)) ? base : '?';
+  }).join('');
+
+  // Decodifica (una sola vez) la tabla de glifos y el bitmap de una fuente y tamaño
+  const cacheFnt = new Map();
+  function datosFnt(id, tam) {
+    const k = id + '|' + tam; let d = cacheFnt.get(k);
+    if (!d) {
+      const f = FNT.fuentes[id].tamanos[tam], t = b64ABytes(f.t), g = new Map();
+      let asc = 0, desc = 0;
+      FNT_COD.forEach((c, i) => {
+        const o = i * 7, w = t[o + 2], h = t[o + 3], xo = (t[o + 5] << 24) >> 24, yo = (t[o + 6] << 24) >> 24;
+        g.set(c, { off: t[o] | (t[o + 1] << 8), w, h, adv: t[o + 4], xo, yo });
+        if (w > 0 && h > 0) { if (-yo > asc) asc = -yo; if (yo + h > desc) desc = yo + h; }   // lo que sube y baja de la linea base
+      });
+      d = { g, b: b64ABytes(f.b), asc, desc, y: f.y }; cacheFnt.set(k, d);
+    }
+    return d;
+  }
+  // La letra i se dibuja con el cursor en floor(S_i / 8), S_i = suma de (avance * 8 + trk8) de las anteriores (trk8 en 1/8 de punto).
+  // Ancho = de la primera tinta a la ultima (los espacios no cuentan).
+  function geomFnt(id, tam, texto, trk8) {
+    const d = datosFnt(id, tam); let S = 0, izq = Infinity, der = -Infinity; const pos = [];
+    for (const ch of texto) {
+      const g = d.g.get(ch.charCodeAt(0)), px = Math.floor(S / 8); pos.push(px);
+      if (g.w > 0 && g.h > 0) { izq = Math.min(izq, px + g.xo); der = Math.max(der, px + g.xo + g.w); }
+      S += g.adv * 8 + trk8;
+    }
+    if (izq === Infinity) { izq = 0; der = 0; }
+    return { d, pos, izq, der, ancho: der - izq };
+  }
+  // "Letras juntas": si no cabe, el ajuste mas chico (hasta MAX_APRETAR8) que lo hace caber; si ya cabe, 0
+  function trk8Fnt(id, tam, texto, junto) {
+    if (!junto || texto.length < 2 || geomFnt(id, tam, texto, 0).ancho <= ANCHO) return 0;
+    for (let t = -1; t >= -MAX_APRETAR8; t--) if (geomFnt(id, tam, texto, t).ancho <= ANCHO) return t;
+    return -MAX_APRETAR8;
+  }
+  const trk8Linea = (l) => trk8Fnt(l.fuente, l.tam, txtFnt(l.t), l.junto);
+  const geomLinea = (l) => geomFnt(l.fuente, l.tam, txtFnt(l.t), trk8Linea(l));
+  const anchoFntLinea = (l) => geomLinea(l).ancho;
+  const altoFntLinea = (l) => { const d = datosFnt(l.fuente, l.tam); return d.asc + d.desc; };
+  // x e y de la linea = borde izquierdo de la tinta y tope del bloque; el cursor de la 1ª letra y la linea base salen de ahi
+  const penFnt = (l) => { const g = geomLinea(l); return { x: posX(l) - g.izq, y: posY(l) + g.d.asc, g }; };
+
+  // Igual que Adafruit_GFX::drawChar con fuente propia: bits de cada glifo seguidos, de a 8, el mas alto primero
+  function dibujarTextoFnt(ctx, l) {
+    const p = penFnt(l), d = p.g.d; let i = 0;
+    for (const ch of txtFnt(l.t)) {
+      const g = d.g.get(ch.charCodeAt(0)), px = p.x + p.g.pos[i++];
+      if (!(g.w > 0 && g.h > 0)) continue;
+      let bo = g.off, bit = 0, cur = 0;
+      for (let yy = 0; yy < g.h; yy++) for (let xx = 0; xx < g.w; xx++) {
+        if ((bit++ & 7) === 0) cur = d.b[bo++];
+        if (cur & 0x80) ctx.fillRect(px + g.xo + xx, p.y + g.yo + yy, 1, 1);
+        cur = (cur << 1) & 0xFF;
+      }
+    }
+  }
+  // Ajustar al ancho: del tamaño elegido para abajo, el mas grande que cabe (primero sin apretar, despues apretando lo justo)
+  function autoFnt(l, pref) {
+    const id = l.fuente, texto = txtFnt(l.t), tams = tamsFnt(id).filter(v => v <= pref).reverse();
+    for (const tam of tams) {
+      if (geomFnt(id, tam, texto, 0).ancho <= ANCHO) return { tam, junto: false };
+      const t8 = trk8Fnt(id, tam, texto, true);
+      if (t8 !== 0 && geomFnt(id, tam, texto, t8).ancho <= ANCHO) return { tam, junto: true };
+    }
+    return { tam: tams.length ? tams[tams.length - 1] : tamsFnt(id)[0], junto: false };
+  }
+  const autoLinea = (l) => esFnt(l) ? autoFnt(l, l.tamPref || l.tam) : autoTam(l.t, l.tamPref || l.tam);
+  const opcionesTam = (l) => esFnt(l) ? tamsFnt(l.fuente).map(v => [v, v + ' pt']) : TAMS.map(v => [v, 'Tam ' + v]);
+  function avisoAncho(l) {
+    if (anchoTxt(l) <= ANCHO) return '';
+    const minimo = esFnt(l) ? l.tam <= tamsFnt(l.fuente)[0] : tamEf(l) <= 1;
+    if (minimo || l.auto) return 'No entra en una línea ni en el tamaño más chico' + (esFnt(l) ? ' de esta fuente' : ' (máx. 21 letras)') + ': partilo en dos líneas.';
+    return 'No entra en el ancho con este tamaño: activá "Ajustar al ancho" o partilo en dos líneas.';
+  }
+
+  // Codigo de C de las fuentes usadas por las lineas dadas (solo los caracteres que se usan) y de la funcion textoFnt.
+  // Devuelve { datos, helper }: los datos van antes de que se usen (tabla de escenas / compXX) y la funcion antes de dibujar.
+  function bloqueFnt(lineas) {
+    const grupos = new Map();
+    lineas.forEach(l => {
+      const k = nombreFnt(l); if (!grupos.has(k)) grupos.set(k, { l, cods: new Set([0x20, 0x3F]) });
+      Array.from(txtFnt(l.t)).forEach(ch => grupos.get(k).cods.add(ch.codePointAt(0)));
+    });
+    const hex = (b) => '0x' + b.toString(16).toUpperCase().padStart(2, '0');
+    let datos = '';
+    grupos.forEach((gr, nom) => {
+      const d = datosFnt(gr.l.fuente, gr.l.tam), cods = [...gr.cods].sort((a, b) => a - b), primero = cods[0], ultimo = cods[cods.length - 1];
+      const bmp = [], gly = [];
+      for (let c = primero; c <= ultimo; c++) {
+        if (!gr.cods.has(c)) { gly.push('{ 0, 0, 0, 0, 0, 0 }'); continue; }          // codigo que no se usa: hueco (la tabla tiene que ser continua)
+        const g = d.g.get(c);
+        if (g.w === 0 || g.h === 0) { gly.push(`{ 0, 0, 0, ${g.adv}, 0, 1 }`); continue; }   // espacio: sin dibujo
+        gly.push(`{ ${bmp.length}, ${g.w}, ${g.h}, ${g.adv}, ${g.xo}, ${g.yo} }`);
+        for (let i = 0; i < Math.ceil(g.w * g.h / 8); i++) bmp.push(d.b[g.off + i]);
+      }
+      const filas = (arr, n, sep) => { const o = []; for (let i = 0; i < arr.length; i += n) o.push('  ' + arr.slice(i, i + n).join(sep)); return o.join(',\n'); };
+      datos += `// Fuente ${FNT.fuentes[gr.l.fuente].nombre} ${gr.l.tam} pt (solo los caracteres que se usan)\n` +
+        `const uint8_t PROGMEM ${nom}_bmp[] = {\n${filas(bmp.map(hex), 16, ', ')}\n};\n` +
+        `const GFXglyph PROGMEM ${nom}_gly[] = {\n${filas(gly, 4, ', ')}\n};\n` +
+        `const GFXfont ${nom} PROGMEM = { (uint8_t *)${nom}_bmp, (GFXglyph *)${nom}_gly, ${hex(primero)}, ${hex(ultimo)}, ${d.y} };\n\n`;
+    });
+    const helper = `// ===== Texto con fuente de ancho variable (FreeSans / FreeSerif) =====
+// x = donde empieza la primera letra, y = linea base, trk8 = ajuste entre letras en 1/8 de punto (negativo = mas juntas).
+void textoFnt(const GFXfont* f, int trk8, int x, int y, const char* t) {
+  display.setFont(f);
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setTextWrap(false);
+  uint8_t primero = pgm_read_byte(&f->first);
+  int acum8 = 0;
+  for (; *t; t++) {
+    display.setCursor(x + acum8 / 8, y);
+    display.write(*t);
+    acum8 += pgm_read_byte(&f->glyph[(uint8_t)*t - primero].xAdvance) * 8 + trk8;
+  }
+  display.setFont();                                  // vuelve a la fuente normal
+}
+
+`;
+    return { datos, helper };
+  }
   const TAMS = [1, 1.5, 2, 2.5, 3, 4, 5];
   const kDe = (tam) => Math.round(tam * 4);                          // tamaño en cuartos: 4 = 1x, 6 = 1.5x, 8 = 2x
-  const kLinea = (l) => kDe(l.tam);
+  const kLinea = (l) => kDe(tamEf(l));
   const anchoGlifoK = (k) => Math.floor(5 * k / 4);                  // ancho de la letra (las 5 columnas)
   const sepNormalK = (k) => Math.floor(6 * k / 4) - anchoGlifoK(k);   // puntos entre letras "de fabrica" (1 punto por cada punto de tamaño)
   // Espacio entre letras, en 1/8 de punto, para una linea de n letras. Con "letras juntas" es el MAS GRANDE que hace entrar el texto en los
@@ -602,11 +747,11 @@
   };
   const nLetras = (l) => txtOled(l.t).length;
   const sep8Linea = (l) => sep8K(kLinea(l), l.junto, nLetras(l));
-  const esEsc = (l) => !Number.isInteger(l.tam) || (!!l.junto && sep8Linea(l) < sepNormalK(kLinea(l)) * 8);   // true = se dibuja con textoEsc
+  const esEsc = (l) => !esFnt(l) && (!Number.isInteger(tamEf(l)) || (!!l.junto && sep8Linea(l) < sepNormalK(kLinea(l)) * 8));   // true = se dibuja con textoEsc
   // la letra i empieza en floor(i * (ancho de letra + espacio)): el espacio puede tener fracciones y se reparte parejo entre las letras
   const anchoTxtN = (n, tam, junto) => { if (n === 0) return 0; const k = kDe(tam), gw = anchoGlifoK(k); return Math.floor((n - 1) * (gw * 8 + sep8K(k, junto, n)) / 8) + gw; };
-  const anchoTxt = (l) => anchoTxtN(nLetras(l), l.tam, l.junto);
-  const altoLinea = (l) => Math.floor(8 * kLinea(l) / 4);            // alto de la celda: 8 filas de la fuente, escaladas
+  const anchoTxt = (l) => esFnt(l) ? anchoFntLinea(l) : anchoTxtN(nLetras(l), tamEf(l), l.junto);
+  const altoLinea = (l) => esFnt(l) ? altoFntLinea(l) : Math.floor(8 * kLinea(l) / 4);   // 5x7: 8 filas escaladas; fuentes: lo que sube + lo que baja de la linea base
   // Del tamaño elegido para abajo, el mas grande que cabe en el ancho de la pantalla: primero con espaciado normal y, si no, con letras juntas
   function autoTam(t, pref) {
     const n = txtOled(t).length;
@@ -818,7 +963,7 @@ function separarArgs(s) {
   if (cur.trim()) args.push(cur);
   return args.map(a => a.trim());
 }
-function stringsLiterales(s) { const out = []; const re = /"([^"]*)"/g; let m; while ((m = re.exec(s)) !== null) out.push(m[1].replace(/\\([0-7]{1,3})|\\x([0-9a-fA-F]{1,2})/g, (_, o, h) => deCp437(o !== undefined ? parseInt(o, 8) : parseInt(h, 16)))); return out; }
+function stringsLiterales(s, latin1) { const out = []; const re = /"([^"]*)"/g; let m; while ((m = re.exec(s)) !== null) out.push(m[1].replace(/\\([0-7]{1,3})|\\x([0-9a-fA-F]{1,2})/g, (_, o, h) => { const c = o !== undefined ? parseInt(o, 8) : parseInt(h, 16); return latin1 ? String.fromCharCode(c) : deCp437(c); })); return out; }
 
 class Interprete {
   constructor(funcs, globalScope) {
@@ -889,6 +1034,13 @@ class Interprete {
           if (nombre === 'borra') { this.pend = { lineas: [] }; return; }
           if (nombre === 'linea') { if (!this.pend) this.pend = { lineas: this.ultimasLineas() }; this.pend.lineas.push(L(s[0] || '', num(0), num(1), num(2))); return; }
           if (nombre === 'textoEsc') { if (!this.pend) this.pend = { lineas: this.ultimasLineas() }; const ln = L(s[0] || '', num(0) / 4, num(2), num(3)); if (num(1) < sepNormalK(num(0)) * 8) ln.junto = true; this.pend.lineas.push(ln); return; }
+          if (nombre === 'textoFnt') {
+            if (!this.pend) this.pend = { lineas: this.ultimasLineas() };
+            const mf = /fnt_([a-z]+)_(\d+)/.exec(args[0] || ''), ln = L(stringsLiterales(argsTxt, true)[0] || '', mf ? +mf[2] : 9, 0, 0);
+            if (mf) { ln.fuente = mf[1]; ln.junto = num(1) < 0; }
+            if (mf && esFnt(ln)) { const g = geomLinea(ln); ln.x = Math.max(0, num(2) + g.izq); ln.y = Math.max(0, num(3) - g.d.asc); }   // del cursor y la linea base al borde de la tinta y el tope
+            this.pend.lineas.push(ln); return;
+          }
           if (nombre === 'muestra') { if (this.pend) this.eventos.push({ nota: this.notas.length, tipo: 'texto', lineas: this.pend.lineas }); this.pend = null; return; }
           if (nombre === 'letra' || nombre === 'agrega') {
             const conTam = !/^\s*"/.test(args[0]);
@@ -1485,6 +1637,7 @@ function convertirInoAEscena(src, nombre) {
     if (evento.tipo === 'texto') {
       ctx.fillStyle = '#7fffe0';
       (evento.lineas || []).forEach(l => {
+        if (esFnt(l)) { dibujarTextoFnt(ctx, l); return; }
         const x = posX(l), y = posY(l);
         dibujarTextoGlcd(ctx, txtOled(l.t), kLinea(l), sep8Linea(l), x, y);
       });
@@ -1636,18 +1789,26 @@ function convertirInoAEscena(src, nombre) {
       const txt = el('input', { type: 'text', value: l.t, placeholder: 'texto (la ñ y las tildes ya funcionan)' });
       const avisoCh = el('div', { className: 'aviso-char' });
       const pintarAviso = () => {
-        const partes = [avisoChars(l.t)];
-        if (anchoTxt(l) > ANCHO) partes.push(l.auto || l.tam <= 1 ? 'No entra en una línea ni en el tamaño más chico (máx. 21 letras): partilo en dos líneas.' : 'No entra en el ancho con este tamaño: activá "Ajustar al ancho" o partilo en dos líneas.');
+        const partes = [avisoChars(l.t, esFnt(l)), fuenteFaltante(l) ? 'Esta línea pide la fuente "' + l.fuente + '" pero no se encontró fuentes.js (o ese tamaño): se muestra con la fuente normal.' : '', avisoAncho(l)];
         const a = partes.filter(Boolean).join(' ');
         avisoCh.textContent = a; avisoCh.style.display = a ? '' : 'none';
       };
       pintarAviso();
       txt.oninput = () => { l.t = txt.value; aplicar(); sync(); };
-      const tam = sel(TAMS.map(v => [v, 'Tam ' + v]), l.tam, v => { l.tam = +v; l.tamPref = +v; aplicar(); sync(); });
+      const tam = sel(opcionesTam(l), l.tam, v => { l.tam = +v; l.tamPref = +v; aplicar(); sync(); });
+      // fuente: la 5x7 de siempre o una de fuentes.js; al cambiarla se vuelve a armar la lista (los tamaños son otros)
+      const opFuentes = [['', '5x7 pixel (normal)']].concat(NOMBRES_FNT.map(id => [id, FNT.fuentes[id].nombre]));
+      if (l.fuente && !NOMBRES_FNT.includes(l.fuente)) opFuentes.push([l.fuente, l.fuente + ' (falta fuentes.js)']);
+      const selFuente = sel(opFuentes, l.fuente || '', v => {
+        if (v) { l.fuente = v; l.tam = l.tamPref = tamsFnt(v).includes(9) ? 9 : tamsFnt(v)[0]; } else { delete l.fuente; l.tam = l.tamPref = 2; }
+        l.junto = false; renderEventos(); ver(ev);
+      });
+      if (!FNT) selFuente.title = 'Para usar más fuentes, poné fuentes.js en la misma carpeta que simulador.html';
+      const filaFuente = el('div', { className: 'fila' }, [el('span', { textContent: 'Fuente', style: 'font-size:.72rem; color:var(--ink-dim);' }), selFuente]);
       const chkAuto = el('input', { type: 'checkbox', checked: !!l.auto }), chkJunto = el('input', { type: 'checkbox', checked: !!l.junto });
       // con "ajustar al ancho" el tamaño elegido es el maximo: si el texto no cabe se achica solo (y se juntan las letras si hace falta)
       const aplicar = () => {
-        if (l.auto) { const r = autoTam(l.t, l.tamPref || l.tam); l.tam = r.tam; l.junto = r.junto; }
+        if (l.auto) { const r = autoLinea(l); l.tam = r.tam; l.junto = r.junto; }
         tam.value = String(l.tam); chkJunto.checked = !!l.junto; chkJunto.disabled = !!l.auto;
         pintarAviso();
       };
@@ -1668,6 +1829,7 @@ function convertirInoAEscena(src, nombre) {
         el('div', { className: 'fila' }, [txt, tam, del]),
         avisoCh,
         el('div', { className: 'fila' }, [selH, selV]),
+        filaFuente,
         filaTam,
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'X' }), sx, vx]),
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'Y' }), sy, vy])]));
@@ -2216,7 +2378,7 @@ void muestra(){ display.display(); }
     if (ev.tipo === 'fin') return '  borra();\n  muestra();\n';
     if (ev.tipo === 'imagen') return `  borra();\n  display.drawBitmap(0, 0, ${ev.imagen}, ${ANCHO}, ${ALTO}, WHITE);\n  muestra();\n`;
     let c = '  borra();\n';
-    ev.lineas.forEach(l => { if (l.t) c += esEsc(l) ? `  textoEsc(${kLinea(l)}, ${sep8Linea(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n` : `  linea(${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
+    ev.lineas.forEach(l => { if (!l.t) return; if (esFnt(l)) { const p = penFnt(l); c += `  textoFnt(&${nombreFnt(l)}, ${trk8Linea(l)}, ${p.x}, ${p.y}, ${cStr(txtFnt(l.t))});\n`; } else c += esEsc(l) ? `  textoEsc(${kLinea(l)}, ${sep8Linea(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n` : `  linea(${tamEf(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
     return c + '  muestra();\n';
   }
   function imagenesUsadas(ordenados, yaEn) {
@@ -2241,14 +2403,16 @@ void muestra(){ display.display(); }
       if (!funcs[g]) return;
       let k = 0; const nuevas = [];
       funcs[g].cuerpo.split('\n').forEach(l => {
-        if (/^\s*(letra|agrega|borra|linea|textoEsc|muestra)\s*\(/.test(l)) return;
+        if (/^\s*(letra|agrega|borra|linea|textoEsc|textoFnt|muestra)\s*\(/.test(l)) return;
         if (/^\s*notaL?\s*\(/.test(l)) { ((porG[g] || {})[k] || []).forEach(ev => nuevas.push(codigoEvento(ev).replace(/\n$/, ''))); k++; }
         nuevas.push(l);
       });
       out = out.replace(funcs[g].cuerpo, () => nuevas.join('\n'));
     });
     const lEsc = ordenados.filter(e => e.tipo === 'texto').flatMap(e => e.lineas.filter(l => l.t && esEsc(l)));
-    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS) + (lEsc.length ? bloqueEsc(lEsc) : '');
+    const lFnt = ordenados.filter(e => e.tipo === 'texto').flatMap(e => e.lineas.filter(l => l.t && esFnt(l)));
+    const bFntP = lFnt.length ? bloqueFnt(lFnt) : { datos: '', helper: '' };
+    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS) + (lEsc.length ? bloqueEsc(lEsc) : '') + bFntP.datos + bFntP.helper;
     if (extra) out = out.replace(/void\s+setup\s*\(/, m => extra + m);
     if (omitidos) alert(omitidos + ' evento(s) no se pudieron ubicar dentro de una función (¿función repetida en loop?) y quedaron fuera.');
     return out;
@@ -2332,14 +2496,24 @@ void revisaAnim() {
     const iniDibuja = sA ? '  animAct = e.anim; animT = e.t; animProx = 0; animCuadro = -1;\n  if (e.anim) { revisaAnim(); return; }\n' : '';
     const llamaAnim = sA ? '  revisaAnim();\n' : '';
     const resetLoop = sA ? '  animAct = NULL;\n' : '';
-    // ---- texto con tamaño intermedio o letras juntas: Linea gana k y sep (k = 0 -> texto normal con setTextSize) ----
-    const lineasEsc = ord0.filter(e => e.tipo === 'texto').flatMap(e => lin(e)).filter(esEsc);
-    const usaEsc = lineasEsc.length > 0;      // false = ni una linea lo usa: el .ino sale exactamente como siempre
-    const itemLinea = (l) => esEsc(l) ? `{0, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))}, ${kLinea(l)}, ${sep8Linea(l)}}`
-                                      : `{${l.tam}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))}${usaEsc ? ', 0, 0' : ''}}`;
-    const campoEsc = usaEsc ? ' byte k; byte sep8;' : '';
-    const funcEsc = usaEsc ? bloqueEsc(lineasEsc) : '';
-    const saltoEsc = usaEsc ? '    if (e.l[i].k) { textoEsc(e.l[i].k, e.l[i].sep8, e.l[i].x, e.l[i].y, e.l[i].txt); continue; }\n' : '';
+    // ---- textos con tamaño intermedio / letras juntas (5x7 escalado) y con las fuentes de fuentes.js ----
+    // Linea gana k y sep8 (usaEsc) y f y trk8 (usaFnt); con k = 0 y f = NULL es texto normal con setTextSize
+    const lineasTexto = ord0.filter(e => e.tipo === 'texto').flatMap(e => lin(e));
+    const lineasEsc = lineasTexto.filter(esEsc), lineasFnt = lineasTexto.filter(esFnt);
+    const usaEsc = lineasEsc.length > 0, usaFnt = lineasFnt.length > 0;      // ninguna: el .ino sale exactamente como siempre
+    const bFnt = usaFnt ? bloqueFnt(lineasFnt) : { datos: '', helper: '' };
+    const itemLinea = (l) => {
+      let f;
+      if (esFnt(l)) { const p = penFnt(l); f = [0, p.x, p.y, cStr(txtFnt(l.t)), 0, 0, '&' + nombreFnt(l), trk8Linea(l)]; }
+      else if (esEsc(l)) f = [0, posX(l), posY(l), cStr(txtOled(l.t)), kLinea(l), sep8Linea(l), 'NULL', 0];
+      else f = [tamEf(l), posX(l), posY(l), cStr(txtOled(l.t)), 0, 0, 'NULL', 0];
+      return '{' + f.slice(0, 4).concat(usaEsc ? f.slice(4, 6) : [], usaFnt ? f.slice(6, 8) : []).join(', ') + '}';
+    };
+    const campoEsc = (usaEsc ? ' byte k; byte sep8;' : '') + (usaFnt ? ' const GFXfont* f; int8_t trk8;' : '');
+    const tipoXY = usaFnt ? 'int16_t x; int16_t y; ' : 'byte x; byte y; ';
+    const funcEsc = (usaEsc ? bloqueEsc(lineasEsc) : '') + bFnt.helper;
+    const saltoEsc = (usaEsc ? '    if (e.l[i].k) { textoEsc(e.l[i].k, e.l[i].sep8, e.l[i].x, e.l[i].y, e.l[i].txt); continue; }\n' : '') +
+                     (usaFnt ? '    if (e.l[i].f) { textoFnt(e.l[i].f, e.l[i].trk8, e.l[i].x, e.l[i].y, e.l[i].txt); continue; }\n' : '');
     const filasEsc = esc.map(({ t, ev }) => {
       if (!ev || (ev.tipo === 'gif' && !gifOk(ev))) return `  { ${t}, NULL, ${NA}0, {} },`;
       if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, ${NA}0, {} },`;
@@ -2373,10 +2547,10 @@ const int N_NOTAS = sizeof(melodia) / sizeof(melodia[0]);
 // ===== Pantalla: cada escena sale en el ms indicado (t), contado desde el inicio de la melodia =====
 ${comentEsc}
 #define MAXL ${maxL}
-struct Linea  { byte tam; byte x; byte y; const char* txt;${campoEsc} };
+struct Linea  { byte tam; ${tipoXY}const char* txt;${campoEsc} };
 ${defAnim}struct Escena { unsigned long t; const uint8_t* img; ${campoAnim}byte n; Linea l[MAXL]; };
 
-${tablasAnim}const Escena escenas[] = {
+${bFnt.datos}${tablasAnim}const Escena escenas[] = {
 ${filasEsc}
   { 0xFFFFFFFF, NULL, ${NA}0, {} }   // fin de la lista
 };
