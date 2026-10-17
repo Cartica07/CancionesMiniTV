@@ -536,6 +536,8 @@
   let ultimoTimestamp = null;
 
   let audioCtx = null, osc = null, gainNode = null;
+  let ancla = null, sigProg = 0;       // sonido preciso del buzzer (ver agendaNotas): ancla = { t: reloj de audio, ms: posicion del timeline }
+  const AGENDA_MS = 1500;              // cuanto por delante se van agendando las notas
   const audioRef = document.getElementById('audioRef'); let usarMp3 = false; let modoSonido = 'mp3';
   const desfase = () => parseFloat(document.getElementById('desfaseMp3').value) || 0;
   // "Empezar a sonar el mp3 despues de": el mp3 queda en silencio hasta retrasoMp3Ms y recien ahi arranca (desde su segundo 0).
@@ -1469,7 +1471,7 @@ function convertirInoAEscena(src, nombre) {
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
-    if (gainNode) gainNode.gain.value = 0;
+    cortaSonido();
     irMp3(0);
     renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
     guardarProyectoActual();
@@ -1534,7 +1536,7 @@ function convertirInoAEscena(src, nombre) {
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
-    if (gainNode) gainNode.gain.value = 0;
+    cortaSonido();
     irMp3(0);
     renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
     sellarRecorte();
@@ -1630,6 +1632,40 @@ function convertirInoAEscena(src, nombre) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
 
+  // ---- sonido preciso del buzzer ----
+  // Antes la frecuencia se cambiaba una sola vez por cuadro de pantalla (~16.7 ms): cada inicio y fin de nota se corria hasta 17 ms
+  // y los huecos de 30 ms entre notas repetidas quedaban en 16 o 33 ms (se oia como un micro lag en los ritmos rapidos).
+  // Ahora las notas se agendan en el reloj de audio (exacto al muestreo); los cuadros solo agendan las que vienen.
+  function cortaSonido() {
+    ancla = null;
+    if (!gainNode) return;
+    const t = audioCtx.currentTime;
+    gainNode.gain.cancelScheduledValues(t);
+    osc.frequency.cancelScheduledValues(t);
+    gainNode.gain.setValueAtTime(0, t);
+    gainNode.gain.value = 0;
+  }
+  function agendaNotas() {
+    if (!audioCtx || audioCtx.state !== 'running') return;
+    const ahora = audioCtx.currentTime;
+    const tAudio = (ms) => ancla.t + (ms - ancla.ms) / 1000;
+    if (ancla && Math.abs(ahora - tAudio(posicionMs)) > 0.08) cortaSonido();   // se desfaso (pestana dormida, tiron): realinea
+    if (!ancla) {
+      cortaSonido();
+      ancla = { t: ahora, ms: posicionMs };   // el audio arranca ahora: asi ninguna nota (ni la primera) llega recortada
+      sigProg = Math.max(0, notaEnPosicion(posicionMs) || 0);
+    }
+    const limite = posicionMs + AGENDA_MS, n = escena.notas.length;
+    while (sigProg < n && inicioMs[sigProg] <= limite) {
+      const f = escena.notas[sigProg][0];
+      const T = Math.max(ahora, tAudio(Math.max(inicioMs[sigProg], ancla.ms)));   // la nota en curso entra ya (nunca antes del corte)
+      if (f > 0) { osc.frequency.setValueAtTime(f, T); gainNode.gain.setValueAtTime(0.12, T); }
+      else gainNode.gain.setValueAtTime(0, T);
+      sigProg++;
+      if (sigProg >= n) gainNode.gain.setValueAtTime(0, tAudio(inicioMs[n]));   // fin de la cancion
+    }
+  }
+
   function dibujarEscenaEnCanvas(evento, ms) {
     const ctx = document.getElementById('pantallaOled').getContext('2d');
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
@@ -1652,13 +1688,16 @@ function convertirInoAEscena(src, nombre) {
 
   function actualizarEnPosicion(ms, conSonido) {
     const idx = notaEnPosicion(ms);
-    if (idx == null) { if (gainNode) gainNode.gain.value = 0; return; }
+    if (idx == null) { cortaSonido(); return; }
     // antes del retraso inicial la melodia todavia no arranco: no suena nada, pero los eventos
     // (texto / imagen) que hayas puesto en ese lapso SI se muestran normalmente
     const enRetraso = ms < inicioMs[0];
     const [freq] = escena.notas[idx];
     if (gainNode) {
-      if (!enRetraso && conSonido && freq > 0 && (!usarMp3 || modoSonido !== 'mp3')) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }
+      const suena = conSonido && (!usarMp3 || modoSonido !== 'mp3');
+      if (!suena) cortaSonido();
+      else if (!usarMp3) agendaNotas();   // preciso: reloj de audio
+      else if (!enRetraso && freq > 0) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }   // con mp3 la posicion la manda el mp3: se queda por cuadro
       else gainNode.gain.value = 0;
     }
     const evento = eventoActivoEn(ms);
@@ -1685,7 +1724,7 @@ function convertirInoAEscena(src, nombre) {
       if (posicionMs >= duracionTotalMs) {
         posicionMs = duracionTotalMs; reproduciendo = false; ultimoTimestamp = null;
         document.getElementById('btnPlay').textContent = '▶ Reproducir';
-        if (gainNode) gainNode.gain.value = 0;
+        cortaSonido();
       }
       actualizarEnPosicion(posicionMs, reproduciendo);
     }
@@ -1701,12 +1740,12 @@ function convertirInoAEscena(src, nombre) {
     ultimoTimestamp = null;
     sincronizarMp3();
     document.getElementById('btnPlay').textContent = reproduciendo ? '⏸ Pausar' : '▶ Reproducir';
-    if (!reproduciendo && gainNode) gainNode.gain.value = 0;
+    if (!reproduciendo) cortaSonido();
   });
   document.getElementById('btnStop').addEventListener('click', () => {
     reproduciendo = false; posicionMs = 0; ultimoTimestamp = null; irMp3(0);
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
-    if (gainNode) gainNode.gain.value = 0;
+    cortaSonido();
     actualizarEnPosicion(0, false);
   });
   document.getElementById('scrub').addEventListener('input', (e) => {
