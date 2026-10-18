@@ -554,8 +554,8 @@
 
   // ---- modelo de texto: cada linea = {t, tam, x, y, ah, av}; ah/av = izq|centro|der|libre y arriba|centro|abajo|libre ----
   const L = (t, tam, x, y) => ({ t, tam, x, y, ah: 'libre', av: 'libre' });
-  const nuevaLinea = (t, tam, ah, av) => {   // las lineas nuevas usan FreeSans (si esta fuentes.js) y se ajustan solas al ancho
-    const l = { t, tam, x: 0, y: 0, ah, av, auto: true, tamPref: tam };
+  const nuevaLinea = (t, tam, ah, av) => {   // las lineas nuevas usan FreeSans (si esta fuentes.js); el ajuste al ancho viene apagado
+    const l = { t, tam, x: 0, y: 0, ah, av, auto: false, tamPref: tam };
     if (FNT && FNT.fuentes[FUENTE_DEFECTO]) { l.fuente = FUENTE_DEFECTO; l.tam = l.tamPref = tamsFnt(FUENTE_DEFECTO).includes(TAM_DEFECTO_FNT) ? TAM_DEFECTO_FNT : tamsFnt(FUENTE_DEFECTO)[0]; }
     return l;
   };
