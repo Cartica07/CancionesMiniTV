@@ -536,8 +536,6 @@
   let ultimoTimestamp = null;
 
   let audioCtx = null, osc = null, gainNode = null;
-  let ancla = null, sigProg = 0;       // sonido preciso del buzzer (ver agendaNotas): ancla = { t: reloj de audio, ms: posicion del timeline }
-  const AGENDA_MS = 1500;              // cuanto por delante se van agendando las notas
   const audioRef = document.getElementById('audioRef'); let usarMp3 = false; let modoSonido = 'mp3';
   const desfase = () => parseFloat(document.getElementById('desfaseMp3').value) || 0;
   // "Empezar a sonar el mp3 despues de": el mp3 queda en silencio hasta retrasoMp3Ms y recien ahi arranca (desde su segundo 0).
@@ -556,7 +554,11 @@
 
   // ---- modelo de texto: cada linea = {t, tam, x, y, ah, av}; ah/av = izq|centro|der|libre y arriba|centro|abajo|libre ----
   const L = (t, tam, x, y) => ({ t, tam, x, y, ah: 'libre', av: 'libre' });
-  const nuevaLinea = (t, tam, ah, av) => ({ t, tam, x: 0, y: 0, ah, av, auto: true, tamPref: tam });   // las lineas nuevas se ajustan solas al ancho
+  const nuevaLinea = (t, tam, ah, av) => {   // las lineas nuevas usan FreeSans (si esta fuentes.js) y se ajustan solas al ancho
+    const l = { t, tam, x: 0, y: 0, ah, av, auto: true, tamPref: tam };
+    if (FNT && FNT.fuentes[FUENTE_DEFECTO]) { l.fuente = FUENTE_DEFECTO; l.tam = l.tamPref = tamsFnt(FUENTE_DEFECTO).includes(TAM_DEFECTO_FNT) ? TAM_DEFECTO_FNT : tamsFnt(FUENTE_DEFECTO)[0]; }
+    return l;
+  };
   // ---- Texto para la OLED ----
   // La fuente de Adafruit_GFX es CP437: 1 byte por caracter (no UTF-8). Sus codigos 0x80-0xAF incluyen ñ Ñ ¿ ¡ á é í ó ú ü É y otras,
   // asi que se imprimen como texto normal, sin hacer una imagen por palabra. Lo que la fuente no tiene (Á Í Ó Ú ã...) pierde la tilde.
@@ -601,6 +603,7 @@
   const FNT_COD = FNT ? FNT.codigos : [];
   const FNT_IDX = new Map(FNT_COD.map((c, i) => [c, i]));
   const NOMBRES_FNT = FNT ? Object.keys(FNT.fuentes) : [];
+  const FUENTE_DEFECTO = 'sans', TAM_DEFECTO_FNT = 10;       // lineas nuevas: FreeSans 10 pt (la "H" mide 15 puntos, casi como el tamaño 2 de la 5x7)
   const MAX_APRETAR8 = 4;                                    // "letras juntas" aprieta como mucho 0.5 punto entre letras (en 1/8 de punto)
   const tamsFnt = (id) => Object.keys(FNT.fuentes[id].tamanos).map(Number).sort((a, b) => a - b);
   const esFnt = (l) => !!(l.fuente && FNT && FNT.fuentes[l.fuente] && FNT.fuentes[l.fuente].tamanos[l.tam]);
@@ -689,8 +692,11 @@
     return 'No entra en el ancho con este tamaño: activá "Ajustar al ancho" o partilo en dos líneas.';
   }
 
-  // Codigo de C de las fuentes usadas por las lineas dadas (solo los caracteres que se usan) y de la funcion textoFnt.
-  // Devuelve { datos, helper }: los datos van antes de que se usen (tabla de escenas / compXX) y la funcion antes de dibujar.
+  // Codigo de C de las fuentes usadas por las lineas dadas y de la funcion textoFnt.
+  // Cada fuente+tamaño lleva SOLO los caracteres que se usan, con codigos seguidos desde 0x20 (la tabla de glifos de Adafruit tiene que ser
+  // continua: asi no se paga una entrada por cada codigo sin usar). El texto se escribe con esos codigos nuevos, y un comentario deja la
+  // lista de caracteres originales para poder releerlo al importar.
+  // Devuelve { datos, helper, texto(l) }: los datos van antes de que se usen, la funcion antes de dibujar, texto(l) es el literal de C de la linea.
   function bloqueFnt(lineas) {
     const grupos = new Map();
     lineas.forEach(l => {
@@ -700,21 +706,28 @@
     const hex = (b) => '0x' + b.toString(16).toUpperCase().padStart(2, '0');
     let datos = '';
     grupos.forEach((gr, nom) => {
-      const d = datosFnt(gr.l.fuente, gr.l.tam), cods = [...gr.cods].sort((a, b) => a - b), primero = cods[0], ultimo = cods[cods.length - 1];
+      const d = datosFnt(gr.l.fuente, gr.l.tam), orden = [...gr.cods].sort((a, b) => a - b);
+      gr.nuevo = new Map(orden.map((c, i) => [c, 0x20 + i]));
       const bmp = [], gly = [];
-      for (let c = primero; c <= ultimo; c++) {
-        if (!gr.cods.has(c)) { gly.push('{ 0, 0, 0, 0, 0, 0 }'); continue; }          // codigo que no se usa: hueco (la tabla tiene que ser continua)
+      orden.forEach(c => {
         const g = d.g.get(c);
-        if (g.w === 0 || g.h === 0) { gly.push(`{ 0, 0, 0, ${g.adv}, 0, 1 }`); continue; }   // espacio: sin dibujo
+        if (g.w === 0 || g.h === 0) { gly.push(`{ 0, 0, 0, ${g.adv}, 0, 1 }`); return; }      // espacio: sin dibujo
         gly.push(`{ ${bmp.length}, ${g.w}, ${g.h}, ${g.adv}, ${g.xo}, ${g.yo} }`);
         for (let i = 0; i < Math.ceil(g.w * g.h / 8); i++) bmp.push(d.b[g.off + i]);
-      }
+      });
       const filas = (arr, n, sep) => { const o = []; for (let i = 0; i < arr.length; i += n) o.push('  ' + arr.slice(i, i + n).join(sep)); return o.join(',\n'); };
       datos += `// Fuente ${FNT.fuentes[gr.l.fuente].nombre} ${gr.l.tam} pt (solo los caracteres que se usan)\n` +
+        `// ${nom} codigos: ${orden.map(c => c.toString(16).toUpperCase().padStart(2, '0')).join(' ')}\n` +
         `const uint8_t PROGMEM ${nom}_bmp[] = {\n${filas(bmp.map(hex), 16, ', ')}\n};\n` +
         `const GFXglyph PROGMEM ${nom}_gly[] = {\n${filas(gly, 4, ', ')}\n};\n` +
-        `const GFXfont ${nom} PROGMEM = { (uint8_t *)${nom}_bmp, (GFXglyph *)${nom}_gly, ${hex(primero)}, ${hex(ultimo)}, ${d.y} };\n\n`;
+        `const GFXfont ${nom} PROGMEM = { (uint8_t *)${nom}_bmp, (GFXglyph *)${nom}_gly, 0x20, ${hex(0x20 + orden.length - 1)}, ${d.y} };\n\n`;
     });
+    // literal de C del texto con los codigos nuevos; el '?' siempre en octal para que dos seguidos no formen un trigrafo
+    const texto = (l) => '"' + Array.from(txtFnt(l.t)).map(ch => {
+      const c = grupos.get(nombreFnt(l)).nuevo.get(ch.codePointAt(0));
+      if (c === 0x22 || c === 0x5C) return '\\' + String.fromCharCode(c);
+      return c >= 0x20 && c <= 0x7E && c !== 0x3F ? String.fromCharCode(c) : '\\' + c.toString(8).padStart(3, '0');
+    }).join('') + '"';
     const helper = `// ===== Texto con fuente de ancho variable (FreeSans / FreeSerif) =====
 // x = donde empieza la primera letra, y = linea base, trk8 = ajuste entre letras en 1/8 de punto (negativo = mas juntas).
 void textoFnt(const GFXfont* f, int trk8, int x, int y, const char* t) {
@@ -733,7 +746,7 @@ void textoFnt(const GFXfont* f, int trk8, int x, int y, const char* t) {
 }
 
 `;
-    return { datos, helper };
+    return { datos, helper, texto };
   }
   const TAMS = [1, 1.5, 2, 2.5, 3, 4, 5];
   const kDe = (tam) => Math.round(tam * 4);                          // tamaño en cuartos: 4 = 1x, 6 = 1.5x, 8 = 2x
@@ -1039,6 +1052,8 @@ class Interprete {
           if (nombre === 'textoFnt') {
             if (!this.pend) this.pend = { lineas: this.ultimasLineas() };
             const mf = /fnt_([a-z]+)_(\d+)/.exec(args[0] || ''), ln = L(stringsLiterales(argsTxt, true)[0] || '', mf ? +mf[2] : 9, 0, 0);
+            const mc = mf ? new RegExp('//\\s*fnt_' + mf[1] + '_' + mf[2] + '\\s+codigos:([0-9A-Fa-f ]+)').exec(this.rawSrc || '') : null;
+            if (mc) { const lista = mc[1].trim().split(/\s+/).map(h => parseInt(h, 16)); ln.t = Array.from(ln.t).map(ch => String.fromCharCode(lista[ch.charCodeAt(0) - 0x20] || 63)).join(''); }
             if (mf) { ln.fuente = mf[1]; ln.junto = num(1) < 0; }
             if (mf && esFnt(ln)) { const g = geomLinea(ln); ln.x = Math.max(0, num(2) + g.izq); ln.y = Math.max(0, num(3) - g.d.asc); }   // del cursor y la linea base al borde de la tinta y el tope
             this.pend.lineas.push(ln); return;
@@ -1108,7 +1123,7 @@ function convertirInoAEscena(src, nombre) {
   const globalScope = parsearGlobales(sinFunciones);
 
   const interp = new Interprete(funcs, globalScope);
-  interp.nuevo = /void\s+notaL\s*\(/.test(sinComentarios);
+  interp.nuevo = /void\s+notaL\s*\(/.test(sinComentarios); interp.rawSrc = src;
   const gv = (n, d) => { try { return globalScope.get(n); } catch (e) { return d; } };
   interp.ajuste = gv('ajuste', 10000); interp.art = gv('art', 100); interp.sil = gv('Sil', 10);
   if (funcs['loop']) interp.ejecutarCuerpo(funcs['loop'].cuerpo, new Scope(globalScope));
@@ -1471,7 +1486,7 @@ function convertirInoAEscena(src, nombre) {
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
-    cortaSonido();
+    if (gainNode) gainNode.gain.value = 0;
     irMp3(0);
     renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
     guardarProyectoActual();
@@ -1536,7 +1551,7 @@ function convertirInoAEscena(src, nombre) {
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
-    cortaSonido();
+    if (gainNode) gainNode.gain.value = 0;
     irMp3(0);
     renderEventos(); renderGaleria(); actualizarEnPosicion(0, false);
     sellarRecorte();
@@ -1632,40 +1647,6 @@ function convertirInoAEscena(src, nombre) {
     if (audioCtx.state === 'suspended') audioCtx.resume();
   }
 
-  // ---- sonido preciso del buzzer ----
-  // Antes la frecuencia se cambiaba una sola vez por cuadro de pantalla (~16.7 ms): cada inicio y fin de nota se corria hasta 17 ms
-  // y los huecos de 30 ms entre notas repetidas quedaban en 16 o 33 ms (se oia como un micro lag en los ritmos rapidos).
-  // Ahora las notas se agendan en el reloj de audio (exacto al muestreo); los cuadros solo agendan las que vienen.
-  function cortaSonido() {
-    ancla = null;
-    if (!gainNode) return;
-    const t = audioCtx.currentTime;
-    gainNode.gain.cancelScheduledValues(t);
-    osc.frequency.cancelScheduledValues(t);
-    gainNode.gain.setValueAtTime(0, t);
-    gainNode.gain.value = 0;
-  }
-  function agendaNotas() {
-    if (!audioCtx || audioCtx.state !== 'running') return;
-    const ahora = audioCtx.currentTime;
-    const tAudio = (ms) => ancla.t + (ms - ancla.ms) / 1000;
-    if (ancla && Math.abs(ahora - tAudio(posicionMs)) > 0.08) cortaSonido();   // se desfaso (pestana dormida, tiron): realinea
-    if (!ancla) {
-      cortaSonido();
-      ancla = { t: ahora, ms: posicionMs };   // el audio arranca ahora: asi ninguna nota (ni la primera) llega recortada
-      sigProg = Math.max(0, notaEnPosicion(posicionMs) || 0);
-    }
-    const limite = posicionMs + AGENDA_MS, n = escena.notas.length;
-    while (sigProg < n && inicioMs[sigProg] <= limite) {
-      const f = escena.notas[sigProg][0];
-      const T = Math.max(ahora, tAudio(Math.max(inicioMs[sigProg], ancla.ms)));   // la nota en curso entra ya (nunca antes del corte)
-      if (f > 0) { osc.frequency.setValueAtTime(f, T); gainNode.gain.setValueAtTime(0.12, T); }
-      else gainNode.gain.setValueAtTime(0, T);
-      sigProg++;
-      if (sigProg >= n) gainNode.gain.setValueAtTime(0, tAudio(inicioMs[n]));   // fin de la cancion
-    }
-  }
-
   function dibujarEscenaEnCanvas(evento, ms) {
     const ctx = document.getElementById('pantallaOled').getContext('2d');
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
@@ -1688,16 +1669,13 @@ function convertirInoAEscena(src, nombre) {
 
   function actualizarEnPosicion(ms, conSonido) {
     const idx = notaEnPosicion(ms);
-    if (idx == null) { cortaSonido(); return; }
+    if (idx == null) { if (gainNode) gainNode.gain.value = 0; return; }
     // antes del retraso inicial la melodia todavia no arranco: no suena nada, pero los eventos
     // (texto / imagen) que hayas puesto en ese lapso SI se muestran normalmente
     const enRetraso = ms < inicioMs[0];
     const [freq] = escena.notas[idx];
     if (gainNode) {
-      const suena = conSonido && (!usarMp3 || modoSonido !== 'mp3');
-      if (!suena) cortaSonido();
-      else if (!usarMp3) agendaNotas();   // preciso: reloj de audio
-      else if (!enRetraso && freq > 0) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }   // con mp3 la posicion la manda el mp3: se queda por cuadro
+      if (!enRetraso && conSonido && freq > 0 && (!usarMp3 || modoSonido !== 'mp3')) { osc.frequency.setValueAtTime(freq, audioCtx.currentTime); gainNode.gain.value = 0.12; }
       else gainNode.gain.value = 0;
     }
     const evento = eventoActivoEn(ms);
@@ -1724,7 +1702,7 @@ function convertirInoAEscena(src, nombre) {
       if (posicionMs >= duracionTotalMs) {
         posicionMs = duracionTotalMs; reproduciendo = false; ultimoTimestamp = null;
         document.getElementById('btnPlay').textContent = '▶ Reproducir';
-        cortaSonido();
+        if (gainNode) gainNode.gain.value = 0;
       }
       actualizarEnPosicion(posicionMs, reproduciendo);
     }
@@ -1740,12 +1718,12 @@ function convertirInoAEscena(src, nombre) {
     ultimoTimestamp = null;
     sincronizarMp3();
     document.getElementById('btnPlay').textContent = reproduciendo ? '⏸ Pausar' : '▶ Reproducir';
-    if (!reproduciendo) cortaSonido();
+    if (!reproduciendo && gainNode) gainNode.gain.value = 0;
   });
   document.getElementById('btnStop').addEventListener('click', () => {
     reproduciendo = false; posicionMs = 0; ultimoTimestamp = null; irMp3(0);
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
-    cortaSonido();
+    if (gainNode) gainNode.gain.value = 0;
     actualizarEnPosicion(0, false);
   });
   document.getElementById('scrub').addEventListener('input', (e) => {
@@ -1836,10 +1814,10 @@ function convertirInoAEscena(src, nombre) {
       txt.oninput = () => { l.t = txt.value; aplicar(); sync(); };
       const tam = sel(opcionesTam(l), l.tam, v => { l.tam = +v; l.tamPref = +v; aplicar(); sync(); });
       // fuente: la 5x7 de siempre o una de fuentes.js; al cambiarla se vuelve a armar la lista (los tamaños son otros)
-      const opFuentes = [['', '5x7 pixel (normal)']].concat(NOMBRES_FNT.map(id => [id, FNT.fuentes[id].nombre]));
+      const opFuentes = NOMBRES_FNT.map(id => [id, FNT.fuentes[id].nombre]).concat([['', '5x7 pixel (la clásica)']]);
       if (l.fuente && !NOMBRES_FNT.includes(l.fuente)) opFuentes.push([l.fuente, l.fuente + ' (falta fuentes.js)']);
       const selFuente = sel(opFuentes, l.fuente || '', v => {
-        if (v) { l.fuente = v; l.tam = l.tamPref = tamsFnt(v).includes(9) ? 9 : tamsFnt(v)[0]; } else { delete l.fuente; l.tam = l.tamPref = 2; }
+        if (v) { l.fuente = v; l.tam = l.tamPref = tamsFnt(v).includes(TAM_DEFECTO_FNT) ? TAM_DEFECTO_FNT : tamsFnt(v)[0]; } else { delete l.fuente; l.tam = l.tamPref = 2; }
         l.junto = false; renderEventos(); ver(ev);
       });
       if (!FNT) selFuente.title = 'Para usar más fuentes, poné fuentes.js en la misma carpeta que simulador.html';
@@ -1874,7 +1852,14 @@ function convertirInoAEscena(src, nombre) {
         el('div', { className: 'fila solo-adv' }, [el('span', { className: 'rot', textContent: 'Y' }), sy, vy])]));
     });
     const mas = el('button', { className: 'chico secundario', textContent: '+ línea' });
-    mas.onclick = () => { ev.lineas.push(nuevaLinea('', 2, 'centro', 'abajo')); renderEventos(); };
+    mas.onclick = () => {   // la linea nueva sigue con la fuente, el tamaño y el ajuste de la anterior
+      const nl = nuevaLinea('', 2, 'centro', 'abajo'), ant = ev.lineas[ev.lineas.length - 1];
+      if (ant && (!ant.fuente || esFnt(ant))) {
+        if (ant.fuente) nl.fuente = ant.fuente; else delete nl.fuente;
+        nl.tam = nl.tamPref = ant.tamPref || ant.tam; nl.auto = !!ant.auto; if (!nl.auto) nl.junto = !!ant.junto;
+      }
+      ev.lineas.push(nl); renderEventos();
+    };
     caja.appendChild(el('div', { className: 'acciones-evento' }, [mas]));
     cont.appendChild(caja);
     ver(ev);
@@ -2413,11 +2398,12 @@ void muestra(){ display.display(); }
     });
     return out.sort((a, b) => a.nota - b.nota);
   }
+  let bFntActual = { datos: '', helper: '', texto: () => '""' };   // fuentes del export en curso (modo parche)
   function codigoEvento(ev) {
     if (ev.tipo === 'fin') return '  borra();\n  muestra();\n';
     if (ev.tipo === 'imagen') return `  borra();\n  display.drawBitmap(0, 0, ${ev.imagen}, ${ANCHO}, ${ALTO}, WHITE);\n  muestra();\n`;
     let c = '  borra();\n';
-    ev.lineas.forEach(l => { if (!l.t) return; if (esFnt(l)) { const p = penFnt(l); c += `  textoFnt(&${nombreFnt(l)}, ${trk8Linea(l)}, ${p.x}, ${p.y}, ${cStr(txtFnt(l.t))});\n`; } else c += esEsc(l) ? `  textoEsc(${kLinea(l)}, ${sep8Linea(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n` : `  linea(${tamEf(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
+    ev.lineas.forEach(l => { if (!l.t) return; if (esFnt(l)) { const p = penFnt(l); c += `  textoFnt(&${nombreFnt(l)}, ${trk8Linea(l)}, ${p.x}, ${p.y}, ${bFntActual.texto(l)});\n`; } else c += esEsc(l) ? `  textoEsc(${kLinea(l)}, ${sep8Linea(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n` : `  linea(${tamEf(l)}, ${posX(l)}, ${posY(l)}, ${cStr(txtOled(l.t))});\n`; });
     return c + '  muestra();\n';
   }
   function imagenesUsadas(ordenados, yaEn) {
@@ -2431,6 +2417,8 @@ void muestra(){ display.display(); }
   // Estructura nueva: se conserva TU .ino y solo se reescriben las llamadas de pantalla dentro de cada compXX()
   function parchearIno(src, ordenados) {
     const funcs = encontrarFunciones(src), meta = escena.meta || [], porG = {}; let omitidos = 0;
+    const lFnt = ordenados.filter(e => e.tipo === 'texto').flatMap(e => e.lineas.filter(l => l.t && esFnt(l)));
+    bFntActual = lFnt.length ? bloqueFnt(lFnt) : { datos: '', helper: '', texto: () => '""' };
     ordenados.forEach(ev => {
       const m = meta[ev.nota];
       if (!m || m.g == null || m.inv > 0) { omitidos++; return; }
@@ -2449,9 +2437,7 @@ void muestra(){ display.display(); }
       out = out.replace(funcs[g].cuerpo, () => nuevas.join('\n'));
     });
     const lEsc = ordenados.filter(e => e.tipo === 'texto').flatMap(e => e.lineas.filter(l => l.t && esEsc(l)));
-    const lFnt = ordenados.filter(e => e.tipo === 'texto').flatMap(e => e.lineas.filter(l => l.t && esFnt(l)));
-    const bFntP = lFnt.length ? bloqueFnt(lFnt) : { datos: '', helper: '' };
-    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS) + (lEsc.length ? bloqueEsc(lEsc) : '') + bFntP.datos + bFntP.helper;
+    const extra = imagenesUsadas(ordenados, out) + (/void\s+linea\s*\(/.test(out) ? '' : HELPERS) + (lEsc.length ? bloqueEsc(lEsc) : '') + bFntActual.datos + bFntActual.helper;
     if (extra) out = out.replace(/void\s+setup\s*\(/, m => extra + m);
     if (omitidos) alert(omitidos + ' evento(s) no se pudieron ubicar dentro de una función (¿función repetida en loop?) y quedaron fuera.');
     return out;
@@ -2543,7 +2529,7 @@ void revisaAnim() {
     const bFnt = usaFnt ? bloqueFnt(lineasFnt) : { datos: '', helper: '' };
     const itemLinea = (l) => {
       let f;
-      if (esFnt(l)) { const p = penFnt(l); f = [0, p.x, p.y, cStr(txtFnt(l.t)), 0, 0, '&' + nombreFnt(l), trk8Linea(l)]; }
+      if (esFnt(l)) { const p = penFnt(l); f = [0, p.x, p.y, bFnt.texto(l), 0, 0, '&' + nombreFnt(l), trk8Linea(l)]; }
       else if (esEsc(l)) f = [0, posX(l), posY(l), cStr(txtOled(l.t)), kLinea(l), sep8Linea(l), 'NULL', 0];
       else f = [tamEf(l), posX(l), posY(l), cStr(txtOled(l.t)), 0, 0, 'NULL', 0];
       return '{' + f.slice(0, 4).concat(usaEsc ? f.slice(4, 6) : [], usaFnt ? f.slice(6, 8) : []).join(', ') + '}';
