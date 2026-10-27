@@ -78,9 +78,9 @@
     padding: 6px 8px; border-radius: 5px; font-size: .78rem;
   }
   .acciones-evento { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .dup-evento { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line, #3a3f4b); }
-  .dup-evento input { width: 86px; }
-  .dup-evento .dup-etq { font-size: .72rem; color: var(--ink-dim); }
+  .acciones-evento { align-items: center; }
+  .acciones-evento input[type=number] { width: 72px; }
+  .acciones-evento .dup-etq { font-size: .72rem; color: var(--ink-dim); }
   .evento.recien { outline: 2px solid var(--accent, #4da3ff); transition: outline-color 1.2s; }
   .sin-eventos, .sin-imagenes { color: var(--ink-dim); font-size: .82rem; padding: 20px 10px; text-align: center; }
   .botones-agregar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
@@ -1830,7 +1830,7 @@ function convertirInoAEscena(src, nombre) {
       div.appendChild(acciones);
 
       // Duplicar: copia exacta (mismas lineas, tamaños, posiciones, fuente / misma imagen o GIF / misma duracion)
-      const dup = document.createElement('div'); dup.className = 'dup-evento';
+      const dup = acciones;   // en la misma fila que "Ir acá" y "Usar posición actual"
       const btnDupAqui = document.createElement('button'); btnDupAqui.className = 'chico secundario'; btnDupAqui.textContent = '⧉ Duplicar aquí';
       btnDupAqui.title = 'Pone una copia exacta en el momento actual del reproductor (nota ' + (notaEnPosicion(posicionMs) ?? 0) + ')';
       btnDupAqui.onclick = () => duplicarEvento(ev, posicionMs);
@@ -1846,7 +1846,6 @@ function convertirInoAEscena(src, nombre) {
       dup.appendChild(btnDupAqui);
       dup.appendChild(el('span', { className: 'dup-etq', textContent: 'o en el segundo' }));
       dup.appendChild(inpDup); dup.appendChild(btnDupEn);
-      div.appendChild(dup);
       div._ev = ev;
 
       cont.appendChild(div);
