@@ -78,6 +78,10 @@
     padding: 6px 8px; border-radius: 5px; font-size: .78rem;
   }
   .acciones-evento { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .dup-evento { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line, #3a3f4b); }
+  .dup-evento input { width: 86px; }
+  .dup-evento .dup-etq { font-size: .72rem; color: var(--ink-dim); }
+  .evento.recien { outline: 2px solid var(--accent, #4da3ff); transition: outline-color 1.2s; }
   .sin-eventos, .sin-imagenes { color: var(--ink-dim); font-size: .82rem; padding: 20px 10px; text-align: center; }
   .botones-agregar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 
@@ -1825,8 +1829,43 @@ function convertirInoAEscena(src, nombre) {
       acciones.appendChild(btnIr); acciones.appendChild(btnUsarPos);
       div.appendChild(acciones);
 
+      // Duplicar: copia exacta (mismas lineas, tamaños, posiciones, fuente / misma imagen o GIF / misma duracion)
+      const dup = document.createElement('div'); dup.className = 'dup-evento';
+      const btnDupAqui = document.createElement('button'); btnDupAqui.className = 'chico secundario'; btnDupAqui.textContent = '⧉ Duplicar aquí';
+      btnDupAqui.title = 'Pone una copia exacta en el momento actual del reproductor (nota ' + (notaEnPosicion(posicionMs) ?? 0) + ')';
+      btnDupAqui.onclick = () => duplicarEvento(ev, posicionMs);
+      const inpDup = el('input', { type: 'number', step: 0.01, min: 0, placeholder: 'seg' });
+      inpDup.title = 'Segundo exacto donde poner la copia';
+      const btnDupEn = document.createElement('button'); btnDupEn.className = 'chico secundario'; btnDupEn.textContent = '⧉ Duplicar en…';
+      btnDupEn.onclick = () => {
+        const v = parseFloat(String(inpDup.value).replace(',', '.'));
+        if (!isFinite(v) || v < 0) { alert('Escribí en qué segundo querés la copia (por ejemplo 12.5).'); return; }
+        duplicarEvento(ev, v * 1000);
+      };
+      inpDup.addEventListener('keydown', e => { if (e.key === 'Enter') btnDupEn.click(); });
+      dup.appendChild(btnDupAqui);
+      dup.appendChild(el('span', { className: 'dup-etq', textContent: 'o en el segundo' }));
+      dup.appendChild(inpDup); dup.appendChild(btnDupEn);
+      div.appendChild(dup);
+      div._ev = ev;
+
       cont.appendChild(div);
     });
+  }
+  // Copia exacta de un evento (texto con todas sus lineas, imagen o GIF) en el tiempo pedido (ms del timeline).
+  function duplicarEvento(ev, ms) {
+    ms = Math.round(ms);
+    if (duracionTotalMs > 0 && ms > duracionTotalMs) { alert('Ese momento (' + formatoTiempo(ms) + ') pasa del final de la canción (' + formatoTiempo(duracionTotalMs) + ').'); return; }
+    const copia = JSON.parse(JSON.stringify(ev));   // copia profunda: editar una no toca la otra
+    fijarInicio(copia, ms);
+    const t = tIni(copia);
+    const choque = escena.eventos.find(o => Math.abs(tIni(o) - t) < 1);
+    if (choque && !confirm('Ya hay un evento que empieza en ' + formatoTiempo(t) + '. La copia empezaría en el mismo instante (se vería solo uno). ¿Duplicar igual?')) return;
+    escena.eventos.push(copia);
+    renderEventos(); actualizarEnPosicion(posicionMs, false);
+    const card = [...document.querySelectorAll('#listaEventos .evento')].find(d => d._ev === copia);
+    if (card) { card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); card.classList.add('recien'); setTimeout(() => card.classList.remove('recien'), 1600); }
+    try { guardarProyectoActual(); } catch (e) {}
   }
   const ver = (ev) => dibujarEscenaEnCanvas(ev);
   const el = (tag, props, hijos) => { const e = Object.assign(document.createElement(tag), props || {}); (hijos || []).forEach(h => e.appendChild(h)); return e; };
