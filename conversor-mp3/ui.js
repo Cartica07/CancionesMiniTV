@@ -132,10 +132,11 @@
     try { buf = await ctx.decodeAudioData(datos); }
     catch (e) { throw new Error('No pude leer ese audio. Probá con un MP3 o WAV.'); }
     finally { try { ctx.close(); } catch (e) { /* ya cerrado */ } }
-    const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(buf.duration * 44100)), 44100);
+    const nCanales = Math.min(2, buf.numberOfChannels);            // mono o estereo, igual que el cuaderno (no se mezcla a mono)
+    const off = new OfflineAudioContext(nCanales, Math.max(1, Math.ceil(buf.duration * 44100)), 44100);
     const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
     const r = await off.startRendering();
-    return r.getChannelData(0).slice();
+    return Array.from({ length: nCanales }, (_, c) => r.getChannelData(c).slice());
   }
 
   // ---------- convertir ----------
@@ -145,7 +146,7 @@
     try {
       barra(0.01); estado('Leyendo el audio…');
       const audio = await leerAudio(archivo);
-      const dur = audio.length / 44100;
+      const dur = audio[0].length / 44100;
       if (dur > 900) throw new Error('El audio dura más de 15 minutos. Probá con uno más corto.');
       await prepararMotor();
       estado('Escuchando las notas…'); barra(0.3);
@@ -161,7 +162,7 @@
           else if (m.tipo === 'error') mal(new Error(m.texto));
         };
         worker.onerror = (e) => mal(new Error(e.message || 'Falló el trabajador'));
-        worker.postMessage({ tipo: 'transcribir', audio }, [audio.buffer]);
+        worker.postMessage({ tipo: 'transcribir', audio }, audio.map(c => c.buffer));
       });
       notasCrudas = resultado.notas;
       if (urlOrig) URL.revokeObjectURL(urlOrig);
