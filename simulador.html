@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Simulador de canción OLED</title>
+<script src="coi-serviceworker.min.js"></script>
 <style>
   :root {
     --bg: #0b0e0d; --panel: #121614; --panel-2: #171c1a; --line: #23302b;
@@ -233,6 +234,7 @@
       <div class="tabs">
         <button class="tab-btn activo" id="tabEventosBtn">Eventos</button>
         <button class="tab-btn" id="tabImagenesBtn">🖼 Galería de imágenes</button>
+        <button class="tab-btn" id="tabConversorBtn">Conversor</button>
       </div>
 
       <div id="panelEventos">
@@ -249,6 +251,8 @@
           <p class="sin-eventos">Importá un .ino o cargá un JSON para empezar.</p>
         </div>
       </div>
+
+      <div id="panelConversor" style="display:none;"></div>
 
       <div id="panelImagenes" style="display:none;">
         <div class="opciones-conv">
@@ -370,6 +374,8 @@
 </div>
 
 <script src="fuentes.js"></script>
+<script src="conversor-mp3/motor.js"></script>
+<script src="conversor-mp3/ui.js"></script>
 <script>
 (function () {
   const ANCHO = 128, ALTO = 64;
@@ -2371,18 +2377,17 @@ function convertirInoAEscena(src, nombre) {
   restaurarOpcionesConv();
 
   // ==================== tabs ====================
-  document.getElementById('tabEventosBtn').addEventListener('click', () => {
-    document.getElementById('tabEventosBtn').classList.add('activo');
-    document.getElementById('tabImagenesBtn').classList.remove('activo');
-    document.getElementById('panelEventos').style.display = 'block';
-    document.getElementById('panelImagenes').style.display = 'none';
-  });
-  document.getElementById('tabImagenesBtn').addEventListener('click', () => {
-    document.getElementById('tabImagenesBtn').classList.add('activo');
-    document.getElementById('tabEventosBtn').classList.remove('activo');
-    document.getElementById('panelImagenes').style.display = 'block';
-    document.getElementById('panelEventos').style.display = 'none';
-  });
+  (function () {
+    const pestanas = [['tabEventosBtn', 'panelEventos'], ['tabImagenesBtn', 'panelImagenes'], ['tabConversorBtn', 'panelConversor']];
+    pestanas.forEach(([btn, panel]) => {
+      document.getElementById(btn).addEventListener('click', () => {
+        pestanas.forEach(([b, p]) => {
+          document.getElementById(b).classList.toggle('activo', b === btn);
+          document.getElementById(p).style.display = (p === panel) ? 'block' : 'none';
+        });
+      });
+    });
+  })();
 
   // ==================== importar .ino ====================
   document.getElementById('btnImportarIno').addEventListener('click', () => document.getElementById('modalIno').classList.add('abierto'));
