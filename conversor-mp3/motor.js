@@ -53,32 +53,36 @@
     const eps = params.eps, logEps = Math.log(eps);
     const escala = 1 / N; // normalizacion "ortho": (1/sqrt(N))^2 sobre la potencia
 
-    // marcos (frames) de una porcion de audio, ya normalizados en ganancia -> caracteristicas [T, M, W]
-    return function caracteristicas(segmento) {
-      const hop = params.hopSize;
-      const nFrame = Math.ceil(segmento.length / hop) + 1;
+    // marcos (frames) de una porcion de audio (uno o varios canales), ya normalizados en ganancia -> caracteristicas [T, M, W]
+    // Igual que el original: la ganancia se normaliza con todos los canales juntos y se promedia la POTENCIA de los canales.
+    return function caracteristicas(canales) {
+      const hop = params.hopSize, C = canales.length, largo = canales[0].length;
+      const nFrame = Math.ceil(largo / hop) + 1;
       const lPad = N >> 1;
-      const rPad = (nFrame - 1) * hop + (N >> 1) - segmento.length;
-      const x = new Float32Array(lPad + segmento.length + rPad);
-      x.set(segmento, lPad);
+      const rPad = (nFrame - 1) * hop + (N >> 1) - largo;
+      const xs = canales.map(seg => { const x = new Float32Array(lPad + largo + rPad); x.set(seg, lPad); return x; });
       // normalizacion de ganancia sobre todos los marcos (media y desviacion con N-1, como torch.std)
       let s = 0, s2 = 0, cnt = 0;
-      for (let f = 0; f < nFrame; f++) { const o = f * hop; for (let i = 0; i < N; i++) { const v = x[o + i]; s += v; s2 += v * v; } }
-      cnt = nFrame * N;
+      for (const x of xs) for (let f = 0; f < nFrame; f++) { const o = f * hop; for (let i = 0; i < N; i++) { const v = x[o + i]; s += v; s2 += v * v; } }
+      cnt = C * nFrame * N;
       const media = s / cnt, varz = (s2 - cnt * media * media) / (cnt - 1), sd = Math.sqrt(Math.max(varz, 0));
       const den = sd + 1e-8;
       const out = new Float32Array(nFrame * M * W);
       for (let f = 0; f < nFrame; f++) {
         const o = f * hop;
-        for (let w = 0; w < W; w += 2) {
-          const wa = ventanas.subarray(w * N, (w + 1) * N), wb = ventanas.subarray((w + 1) * N, (w + 2) * N);
-          for (let i = 0; i < N; i++) { const v = (x[o + i] - media) / den; re[i] = v * wa[i]; im[i] = v * wb[i]; }
-          fft(re, im);
-          for (let k = 0; k < NB; k++) {
-            const k2 = (N - k) & (N - 1);
-            const a1 = re[k] + re[k2], a2 = im[k] - im[k2], b1 = im[k] + im[k2], b2 = re[k] - re[k2];
-            pot[w * NB + k] = (a1 * a1 + a2 * a2) * 0.25 * escala;
-            pot[(w + 1) * NB + k] = (b1 * b1 + b2 * b2) * 0.25 * escala;
+        pot.fill(0);
+        for (let c = 0; c < C; c++) {
+          const x = xs[c];
+          for (let w = 0; w < W; w += 2) {
+            const wa = ventanas.subarray(w * N, (w + 1) * N), wb = ventanas.subarray((w + 1) * N, (w + 2) * N);
+            for (let i = 0; i < N; i++) { const v = (x[o + i] - media) / den; re[i] = v * wa[i]; im[i] = v * wb[i]; }
+            fft(re, im);
+            for (let k = 0; k < NB; k++) {
+              const k2 = (N - k) & (N - 1);
+              const a1 = re[k] + re[k2], a2 = im[k] - im[k2], b1 = im[k] + im[k2], b2 = re[k] - re[k2];
+              pot[w * NB + k] += (a1 * a1 + a2 * a2) * 0.25 * escala / C;
+              pot[(w + 1) * NB + k] += (b1 * b1 + b2 * b2) * 0.25 * escala / C;
+            }
           }
         }
         for (let m = 0; m < M; m++) {
@@ -129,8 +133,8 @@
     const GRUPO = cfg.grupoSimbolos || 10;
 
     // una porcion de audio de 16 s -> notas (en segundos relativos a la porcion) + ultimo fin por simbolo
-    async function porcion(segmento, inicioPorSimbolo, ultimoFrame, progreso) {
-      const { feats, nFrame } = analizar(segmento);
+    async function porcion(canales, inicioPorSimbolo, ultimoFrame, progreso) {
+      const { feats, nFrame } = analizar(canales);
       if (nFrame !== T) throw new Error('numero de marcos inesperado: ' + nFrame);
       if (progreso) progreso('red');
       const ctx = await cfg.encoder(feats);                                     // [90, T, D]
@@ -187,9 +191,9 @@
       const segSec = P.segmentSize, stepSec = P.segmentHop;
       const padIni = segSec - stepSec;
       const pad = Math.ceil(padIni * fs);
-      const x = new Float32Array(audio.length + 2 * pad);
-      x.set(audio, pad);
-      const nSample = x.length;
+      const canales = Array.isArray(audio) ? audio : [audio];        // un canal (mono) o varios (estereo)
+      const xs = canales.map(c => { const x = new Float32Array(c.length + 2 * pad); x.set(c, pad); return x; });
+      const nSample = xs[0].length;
       const startFrame = Math.floor(padIni * fs / hop);
       let startPos = new Array(NS).fill(startFrame);
       const stepSize = Math.ceil(stepSec * fs / hop) * hop;
@@ -201,9 +205,8 @@
       for (let i = 0; i < nSample; i += stepSize) {
         const j = Math.min(i + segSize, nSample);
         const beginTime = i / fs - padIni;
-        const trozo = new Float32Array(segSize);
-        trozo.set(x.subarray(i, j));
-        const { notas, lastP } = await porcion(trozo, startPos, ultimoFrame, (etapa) => onProgreso && onProgreso({ hecho, total, etapa }));
+        const trozos = xs.map(x => { const t = new Float32Array(segSize); t.set(x.subarray(i, j)); return t; });
+        const { notas, lastP } = await porcion(trozos, startPos, ultimoFrame, (etapa) => onProgreso && onProgreso({ hecho, total, etapa }));
         startPos = lastP.map(k => Math.max(k - Math.trunc(stepSize / hop), 0));
         for (const e of notas) {
           e.start += beginTime; e.end += beginTime;
