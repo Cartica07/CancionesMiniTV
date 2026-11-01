@@ -1,0 +1,25 @@
+CONVERSOR MP3 -> MIDI (pestaña "Conversor" del simulador)
+
+Qué hace: convierte una canción de piano en un archivo MIDI, dentro del navegador. El audio no sale de tu computador.
+Motor: Transkun 2.0 (licencia MIT, Yujia Yan) exportado a ONNX + onnxruntime-web (licencia MIT, Microsoft).
+
+Cómo subirlo a GitHub
+1. Copiá TODO el contenido de esta carpeta sobre tu repositorio (reemplaza simulador.html y agrega la carpeta
+   conversor-mp3/ y el archivo coi-serviceworker.min.js).
+2. Subí los cambios. El archivo más grande (conversor-mp3/modelo/encoder.onnx) pesa 51 MB: GitHub acepta hasta 100 MB
+   por archivo, así que se sube normal con git. Si lo subís arrastrando por la web, GitHub limita a 25 MB por archivo:
+   en ese caso usá GitHub Desktop o git.
+3. Esperá a que GitHub Pages publique y abrí el simulador.
+
+Cómo se usa: pestaña "Conversor" -> elegir la canción -> Convertir -> escuchar -> Descargar el MIDI.
+La primera vez baja el modelo (55 MB) y el navegador lo guarda; si lo borra, se vuelve a bajar solo.
+
+Por qué está coi-serviceworker.min.js: permite que el navegador use varios núcleos (hilos). Hace que la página se
+recargue una vez la primera vez que se abre. Si no se pudiera, el conversor sigue funcionando con un solo núcleo (más lento).
+
+Carpeta conversor-mp3/
+  motor.js    algoritmo (análisis del audio, decodificación de notas, escritura del MIDI)
+  worker.js   corre la red neuronal en segundo plano
+  ui.js       la pestaña (botones, reproductor, dibujo de notas)
+  modelo/     encoder.onnx, scorer.onnx, heads.onnx, frontend.bin, params.json
+  ort/        onnxruntime-web (motor de cálculo en el navegador)
