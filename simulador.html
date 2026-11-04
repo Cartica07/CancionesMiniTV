@@ -123,7 +123,8 @@
   .modal-fondo.abierto { display: flex; }
   .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px;
     max-width: 560px; width: 100%; max-height: 80vh; overflow-y: auto; }
-  .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
+  .ta-bloque { width: 100%; min-height: 110px; background: var(--panel-2); border: 1px solid var(--line); color: var(--ink); padding: 8px; border-radius: 6px; font-size: .82rem; font-family: inherit; resize: vertical; box-sizing: border-box; }
   .tab-btn { background: transparent; border: 1px solid var(--line); color: var(--ink-dim); }
   .tab-btn.activo { background: var(--accent); color: #04140d; border-color: var(--accent); }
   .linea-ed { border:1px solid var(--line); border-radius:6px; padding:8px; margin-top:8px; background:var(--panel); }
@@ -235,6 +236,8 @@
         <button class="tab-btn activo" id="tabEventosBtn">Eventos</button>
         <button class="tab-btn" id="tabImagenesBtn">🖼 Galería de imágenes</button>
         <button class="tab-btn" id="tabConversorBtn">Conversor</button>
+        <button class="tab-btn" id="tabTextosBtn">Textos</button>
+        <span id="etiquetaPantalla" style="margin-left:auto; align-self:center; font-size:.72rem; color:var(--ink-dim);"></span>
       </div>
 
       <div id="panelEventos">
@@ -253,6 +256,19 @@
       </div>
 
       <div id="panelConversor" style="display:none;"></div>
+
+      <div id="panelTextos" style="display:none;">
+        <p class="estado-nota" id="notaTextos" style="margin:0 0 8px;"></p>
+        <div class="botones-agregar">
+          <button class="chico" id="btnAgregarTextoT">+ Texto acá</button>
+          <button class="chico secundario" id="btnAgregarImagenT">+ Evento de imagen acá</button>
+          <button class="chico secundario" id="btnSubirImagenAcaT">⬆ Subir imagen y usarla acá</button>
+          <input type="file" id="fileImgTexto" accept="image/*" />
+        </div>
+        <div class="lista-eventos" id="listaTextos">
+          <p class="sin-eventos">Todavía no hay textos. Usá "+ Texto acá".</p>
+        </div>
+      </div>
 
       <div id="panelImagenes" style="display:none;">
         <div class="opciones-conv">
@@ -470,6 +486,8 @@
 
   // ==================== estado ====================
   let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, gifs: {}, retrasoMs: 0, retrasoMp3Ms: 0 };
+  // Dos listas de pantalla: escena.eventos (pestaña Eventos) y escena.textos (pestaña Textos). La que se ve en el reproductor y sale en el .ino es escena.pantalla.
+  const listaAct = () => escena.pantalla === 'textos' ? (escena.textos = escena.textos || []) : escena.eventos;
 
   // ==================== proyectos guardados (localStorage) ====================
   const CLAVE_PROYECTOS = 'oled_sim_proyectos_v1';
@@ -484,7 +502,7 @@
     const nombre = localStorage.getItem(CLAVE_ACTUAL);
     if (!nombre) return;
     const todos = cargarProyectos();
-    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, imagenes: escena.imagenes, gifs: escena.gifs || {}, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
+    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, textos: escena.textos || [], pantalla: escena.pantalla || 'eventos', imagenes: escena.imagenes, gifs: escena.gifs || {}, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
     guardarProyectos(todos);
   }
   function renderSelectorProyectos() {
@@ -506,9 +524,10 @@
       guardarProyectos(todos);
     }
     const p = todos[nombre];
-    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), imagenes: p.imagenes || {}, gifs: p.gifs || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
+    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), textos: (p.textos || []).map(migrar), pantalla: p.pantalla === 'textos' ? 'textos' : 'eventos', imagenes: p.imagenes || {}, gifs: p.gifs || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
     localStorage.setItem(CLAVE_ACTUAL, nombre);
     document.getElementById('inputNombreCancion').value = nombre;
+    mostrarPestanaPantalla();
     recalcularTimeline(); renderEventos(); renderGaleria(); renderSelectorProyectos();
     posicionMs = 0; actualizarEnPosicion(0, false);
     document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
@@ -672,8 +691,8 @@
   const penFnt = (l) => { const g = geomLinea(l); return { x: posX(l) - g.izq, y: posY(l) + g.d.asc, g }; };
 
   // Igual que Adafruit_GFX::drawChar con fuente propia: bits de cada glifo seguidos, de a 8, el mas alto primero
-  function dibujarTextoFnt(ctx, l) {
-    const p = penFnt(l), d = p.g.d; let i = 0;
+  function dibujarTextoFnt(ctx, l, ox, oy) {      // ox, oy (opcionales): esquina de la tinta, sin recortar a la pantalla (para el scroll)
+    const p = ox === undefined ? penFnt(l) : (() => { const g = geomLinea(l); return { x: ox - g.izq, y: oy + g.d.asc, g }; })(), d = p.g.d; let i = 0;
     for (const ch of txtFnt(l.t)) {
       const g = d.g.get(ch.charCodeAt(0)), px = p.x + p.g.pos[i++];
       if (!(g.w > 0 && g.h > 0)) continue;
@@ -826,6 +845,7 @@ void textoEsc(int k, int sep8, int x0, int y, const char* t) {
   function posX(l) { const w = anchoTxt(l); if (l.ah === 'izq') return 0; if (l.ah === 'centro') return Math.max(0, Math.round((ANCHO - w) / 2)); if (l.ah === 'der') return Math.max(0, ANCHO - w); return Math.max(0, Math.min(l.x, ANCHO - w)); }
   function posY(l) { const h = altoLinea(l); if (l.av === 'arriba') return 0; if (l.av === 'centro') return Math.max(0, Math.round((ALTO - h) / 2)); if (l.av === 'abajo') return Math.max(0, ALTO - h); return Math.max(0, Math.min(l.y, ALTO - h)); }
   function migrar(ev) {
+    if (ev && ev.bloque) { try { armarBloque(ev); } catch (e) { console.error('no se pudo armar el bloque de texto', e); } }
     if (ev.tipo === 'texto' && !ev.lineas) {
       ev.lineas = [];
       if (ev.linea1) ev.lineas.push(L(ev.linea1, ev.tamano || 1, 0, ev.y1 ?? 8));
@@ -1460,6 +1480,7 @@ function convertirInoAEscena(src, nombre) {
     if (escena.meta) escena.meta = escena.meta.slice(0, nuevaCantidad);
     recalcularTimeline();
     escena.eventos = escena.eventos.filter(ev => tIni(ev) < duracionTotalMs);
+    escena.textos = (escena.textos || []).filter(ev => tIni(ev) < duracionTotalMs);
     if (posicionMs > duracionTotalMs) posicionMs = duracionTotalMs;
     renderEventos(); renderGaleria(); actualizarEnPosicion(posicionMs, false);
     sellarRecorte();
@@ -1469,10 +1490,10 @@ function convertirInoAEscena(src, nombre) {
 
   // ---- deshacer recorte: antes de cada recorte se guarda (hasta 5) la melodia, los eventos y los retrasos ----
   const MAX_DESHACER_RECORTE = 5;
-  const firmaRecorte = () => JSON.stringify([escena.eventos, escena.retrasoMs || 0, escena.retrasoMp3Ms || 0]);
+  const firmaRecorte = () => JSON.stringify([escena.eventos, escena.textos || [], escena.retrasoMs || 0, escena.retrasoMp3Ms || 0]);
   function apilarRecorte() {
     const pila = escena.deshacerRecorte = escena.deshacerRecorte || [];
-    pila.push(JSON.parse(JSON.stringify({ notas: escena.notas, meta: escena.meta || [], eventos: escena.eventos, retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0 })));
+    pila.push(JSON.parse(JSON.stringify({ notas: escena.notas, meta: escena.meta || [], eventos: escena.eventos, textos: escena.textos || [], retrasoMs: escena.retrasoMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0 })));
     if (pila.length > MAX_DESHACER_RECORTE) pila.shift();
   }
   function sellarRecorte() {   // anota como quedo todo justo despues del recorte, para avisar si despues se editaron cosas
@@ -1491,7 +1512,7 @@ function convertirInoAEscena(src, nombre) {
     if (s.despues !== undefined && s.despues !== firmaRecorte() &&
         !confirm('Después del recorte cambiaste textos, imágenes o retrasos. Si deshacés el recorte, esos cambios se pierden. ¿Seguir?')) return;
     pila.pop();
-    escena.notas = s.notas; escena.meta = s.meta; escena.eventos = s.eventos;
+    escena.notas = s.notas; escena.meta = s.meta; escena.eventos = s.eventos; escena.textos = s.textos || [];
     escena.retrasoMs = s.retrasoMs; escena.retrasoMp3Ms = s.retrasoMp3Ms;
     recalcularTimeline();
     document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
@@ -1537,28 +1558,35 @@ function convertirInoAEscena(src, nombre) {
       T0 = inicioMs[k];
     }
     // eventos: tiempo original de cada uno (con el timeline todavia sin tocar)
-    const tViejo = new Map(escena.eventos.map(ev => [ev, tIni(ev)]));
-    const queda = (ev) => escena.src ? ev.nota >= k : tViejo.get(ev) >= T0;
-    const resto = escena.eventos.filter(queda);
-    const antes = escena.eventos.filter(ev => !queda(ev)).sort((a, b) => tViejo.get(a) - tViejo.get(b));
-    const ultimo = antes[antes.length - 1];
-    const hayEnCero = resto.some(ev => escena.src ? ev.nota === k : tViejo.get(ev) <= T0);
-    const conservar = resto.slice();
-    if (ultimo && !hayEnCero) {
-      const restante = ultimo.dur ? tViejo.get(ultimo) + ultimo.dur - T0 : Infinity;
-      if (restante > 0) { if (ultimo.dur) ultimo.dur = Math.round(restante); conservar.push(ultimo); tViejo.set(ultimo, T0); }
-    }
+    const prep = (lista) => {      // lo mismo para la lista de Eventos y la de Textos
+      const tViejo = new Map(lista.map(ev => [ev, tIni(ev)]));
+      const queda = (ev) => escena.src ? ev.nota >= k : tViejo.get(ev) >= T0;
+      const resto = lista.filter(queda);
+      const antes = lista.filter(ev => !queda(ev)).sort((a, b) => tViejo.get(a) - tViejo.get(b));
+      const ultimo = antes[antes.length - 1];
+      const hayEnCero = resto.some(ev => escena.src ? ev.nota === k : tViejo.get(ev) <= T0);
+      const conservar = resto.slice();
+      if (ultimo && !hayEnCero) {
+        const restante = ultimo.dur ? tViejo.get(ultimo) + ultimo.dur - T0 : Infinity;
+        if (restante > 0) { if (ultimo.dur) ultimo.dur = Math.round(restante); conservar.push(ultimo); tViejo.set(ultimo, T0); }
+      }
+      return { conservar, tViejo };
+    };
+    const prepE = prep(escena.eventos), prepT = prep(escena.textos || []);
     // aplicar
     escena.notas = escena.notas.slice(k);
     if (escena.meta && escena.meta.length) escena.meta = escena.meta.slice(k);
     escena.retrasoMs = nuevoRetraso;
     if (usarMp3) escena.retrasoMp3Ms = (escena.retrasoMp3Ms || 0) - T0;   // el mp3 sigue en su lugar: arranca T0 mas adentro
     recalcularTimeline();
-    escena.eventos = conservar;
-    escena.eventos.forEach(ev => {
-      if (escena.src) ev.nota = Math.max(0, Math.min(escena.notas.length - 1, ev.nota - k));
-      else { ev.ms = Math.max(0, Math.round(tViejo.get(ev) - T0)); ev.nota = notaEnPosicion(ev.ms) ?? 0; }
-    });
+    const aplicarT = (p) => {
+      p.conservar.forEach(ev => {
+        if (escena.src) ev.nota = Math.max(0, Math.min(escena.notas.length - 1, ev.nota - k));
+        else { ev.ms = Math.max(0, Math.round(p.tViejo.get(ev) - T0)); ev.nota = notaEnPosicion(ev.ms) ?? 0; }
+      });
+      return p.conservar;
+    };
+    escena.eventos = aplicarT(prepE); escena.textos = aplicarT(prepT);
     document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
@@ -1631,7 +1659,7 @@ function convertirInoAEscena(src, nombre) {
     else { ev.ms = Math.max(0, Math.round(ms)); ev.nota = notaEnPosicion(ev.ms) ?? 0; }
   }
   function eventoActivoEn(ms) {
-    const ord = [...escena.eventos].sort((a, b) => tIni(a) - tIni(b));
+    const ord = [...listaAct()].sort((a, b) => tIni(a) - tIni(b));
     let activo = null;
     for (const ev of ord) { if (tIni(ev) <= ms) activo = ev; else break; }
     if (activo && activo.dur) {
@@ -1641,7 +1669,7 @@ function convertirInoAEscena(src, nombre) {
     return activo;
   }
   function eventoActivoParaNota(idx) {
-    const ordenados = [...escena.eventos].sort((a, b) => a.nota - b.nota);
+    const ordenados = [...listaAct()].sort((a, b) => a.nota - b.nota);
     let activo = null;
     for (const ev of ordenados) { if (ev.nota <= idx) activo = ev; else break; }
     if (activo && activo.dur && idx >= notaDeTiempo(inicioMs[activo.nota] + activo.dur)) return null;
@@ -1697,6 +1725,7 @@ function convertirInoAEscena(src, nombre) {
     const ctx = document.getElementById('pantallaOled').getContext('2d');
     ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
     if (!evento) return;
+    if (evento.tipo === 'texto' && usaLs(evento)) { dibujarScrollEnCanvas(ctx, evento, ms ?? posicionMs); return; }
     if (evento.tipo === 'texto') {
       ctx.fillStyle = '#7fffe0';
       (evento.lineas || []).forEach(l => {
@@ -1785,13 +1814,14 @@ function convertirInoAEscena(src, nombre) {
   // ==================== render de la lista de eventos ====================
   function renderEventos() {
     actualizarBtnDeshacer();
-    const cont = document.getElementById('listaEventos');
+    const modoTx = escena.pantalla === 'textos', lista = listaAct();
+    const cont = document.getElementById(modoTx ? 'listaTextos' : 'listaEventos');
     cont.innerHTML = '';
-    if (escena.eventos.length === 0) { cont.innerHTML = '<p class="sin-eventos">Todavía no hay eventos.</p>'; return; }
-    const ordenados = [...escena.eventos].sort((a, b) => tIni(a) - tIni(b));
+    if (lista.length === 0) { cont.innerHTML = '<p class="sin-eventos">' + (modoTx ? 'Todavía no hay textos. Usá "+ Texto acá".' : 'Todavía no hay eventos.') + '</p>'; return; }
+    const ordenados = [...lista].sort((a, b) => tIni(a) - tIni(b));
     ordenados.forEach((ev) => {
       const div = document.createElement('div'); div.className = 'evento';
-      const idxReal = escena.eventos.indexOf(ev);
+      const idxReal = lista.indexOf(ev);
       const t = tIni(ev);
 
       const cab = document.createElement('div'); cab.className = 'evento-cabecera';
@@ -1801,7 +1831,7 @@ function convertirInoAEscena(src, nombre) {
       tiempo.textContent = 'nota ' + ev.nota + ' · ' + formatoTiempo(t) + (escena.meta && escena.meta[ev.nota] && escena.meta[ev.nota].g ? ' · ' + escena.meta[ev.nota].g : ''); cab.appendChild(tiempo);
       const sp = document.createElement('span'); sp.className = 'spacer'; cab.appendChild(sp);
       const btnBorrar = document.createElement('button'); btnBorrar.className = 'chico peligro'; btnBorrar.textContent = '🗑';
-      btnBorrar.onclick = () => { escena.eventos.splice(idxReal, 1); renderEventos(); actualizarEnPosicion(posicionMs, false); };
+      btnBorrar.onclick = () => { lista.splice(idxReal, 1); renderEventos(); actualizarEnPosicion(posicionMs, false); };
       cab.appendChild(btnBorrar);
       div.appendChild(cab);
       const campoNum = (etq, val, cb) => { const inp = el('input', { type: 'number', value: val, step: 0.01, min: 0 }); inp.onchange = () => cb(parseFloat(inp.value) || 0); return el('div', { className: 'campo-mini' }, [el('label', { textContent: etq }), inp]); };
@@ -1811,7 +1841,7 @@ function convertirInoAEscena(src, nombre) {
 
       const campos = document.createElement('div'); campos.className = 'campos-evento';
       if (ev.tipo === 'texto') {
-        campos.className = 'campos-evento una-col'; editorTexto(ev, campos);
+        campos.className = 'campos-evento una-col'; if (modoTx && ev.bloque) editorBloque(ev, campos); else editorTexto(ev, campos);
       } else if (ev.tipo === 'gif') {
         const opciones = Object.keys(GIFS()), g = GIFS()[ev.gif];
         campos.className = 'campos-evento una-col';
@@ -1864,17 +1894,172 @@ function convertirInoAEscena(src, nombre) {
     const copia = JSON.parse(JSON.stringify(ev));   // copia profunda: editar una no toca la otra
     fijarInicio(copia, ms);
     const t = tIni(copia);
-    const choque = escena.eventos.find(o => Math.abs(tIni(o) - t) < 1);
+    const choque = listaAct().find(o => Math.abs(tIni(o) - t) < 1);
     if (choque && !confirm('Ya hay un evento que empieza en ' + formatoTiempo(t) + '. La copia empezaría en el mismo instante (se vería solo uno). ¿Duplicar igual?')) return;
-    escena.eventos.push(copia);
+    listaAct().push(copia);
     renderEventos(); actualizarEnPosicion(posicionMs, false);
-    const card = [...document.querySelectorAll('#listaEventos .evento')].find(d => d._ev === copia);
+    const card = [...document.querySelectorAll('#listaEventos .evento, #listaTextos .evento')].find(d => d._ev === copia);
     if (card) { card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); card.classList.add('recien'); setTimeout(() => card.classList.remove('recien'), 1600); }
     try { guardarProyectoActual(); } catch (e) {}
   }
-  const ver = (ev) => dibujarEscenaEnCanvas(ev);
+  const ver = (ev) => dibujarEscenaEnCanvas(ev, ev && ev.bloque ? tIni(ev) : undefined);
   const el = (tag, props, hijos) => { const e = Object.assign(document.createElement(tag), props || {}); (hijos || []).forEach(h => e.appendChild(h)); return e; };
   const sel = (pares, actual, cb) => { const x = el('select'); pares.forEach(([v, t]) => x.appendChild(el('option', { value: v, textContent: t, selected: String(v) === String(actual) }))); x.onchange = () => cb(x.value); return x; };
+  // ==================== pestaña Textos: bloque de texto de varios renglones, con scroll opcional ====================
+  // ev.bloque = { t (texto con saltos de linea), fuente, tam, ah, av, inter (puntos extra entre renglones), scroll, dir ('v' arriba | 'h' izquierda),
+  //               auto (velocidad automatica), vel (puntos/s), pausa (s antes de empezar), pausaFin (s al final, solo auto) }
+  // armarBloque() reparte el texto en renglones que caben en el ancho y los deja en ev.lineas (x, y del bloque entero, sin recortar a la pantalla);
+  // tambien guarda en bloque: filas, alto, ancho y dist (cuanto recorre el scroll).
+  function bloqueNuevo() {
+    const b = { t: 'texto', ah: 'izq', av: 'arriba', inter: 0, scroll: true, dir: 'v', auto: true, vel: 12, pausa: 1, pausaFin: 1 };
+    if (FNT && FNT.fuentes[FUENTE_DEFECTO]) { b.fuente = FUENTE_DEFECTO; b.tam = tamsFnt(FUENTE_DEFECTO).includes(TAM_DEFECTO_FNT) ? TAM_DEFECTO_FNT : tamsFnt(FUENTE_DEFECTO)[0]; } else b.tam = 1;
+    return b;
+  }
+  function armarBloque(ev) {
+    const b = ev.bloque;
+    const mk = (t) => { const l = { t, tam: b.tam, x: 0, y: 0, ah: 'libre', av: 'libre', auto: false, tamPref: b.tam }; if (b.fuente) l.fuente = b.fuente; return l; };
+    const ancho = (t) => anchoTxt(mk(t));
+    const ref = mk('Ág'), hLin = altoLinea(ref);
+    const avance = Math.max(1, (esFnt(ref) ? datosFnt(ref.fuente, ref.tam).y : hLin + Math.max(1, Math.round(kLinea(ref) / 4))) + (+b.inter || 0));
+    const horizontal = !!b.scroll && b.dir === 'h';
+    const parrafos = String(b.t || '').replace(/\r/g, '').split('\n');
+    let filas = [];
+    if (horizontal) { const j = parrafos.filter(p => p.trim() !== '').join('   '); if (j) filas = [j]; }
+    else parrafos.forEach(p => {
+      if (p.trim() === '') { filas.push(''); return; }
+      let act = '';
+      p.trim().split(/ +/).forEach(w => {
+        const cand = act ? act + ' ' + w : w;
+        if (ancho(cand) <= ANCHO) { act = cand; return; }
+        if (act) filas.push(act);
+        act = w;
+        while (act.length > 1 && ancho(act) > ANCHO) {      // una palabra mas ancha que la pantalla: se parte
+          let n = act.length - 1; while (n > 1 && ancho(act.slice(0, n)) > ANCHO) n--;
+          filas.push(act.slice(0, n)); act = act.slice(n);
+        }
+      });
+      filas.push(act);
+    });
+    const n = filas.length, H = n ? (n - 1) * avance + hLin : 0;
+    const y0 = horizontal ? (b.av === 'centro' ? Math.round((ALTO - hLin) / 2) : b.av === 'abajo' ? ALTO - hLin : 0)
+                          : (H <= ALTO ? (b.av === 'centro' ? Math.round((ALTO - H) / 2) : b.av === 'abajo' ? ALTO - H : 0) : 0);
+    let wMax = 0; const lineas = [];
+    filas.forEach((t, i) => {
+      if (!t) return;
+      const l = mk(t), w = ancho(t); wMax = Math.max(wMax, w);
+      l.x = horizontal ? ANCHO : (b.ah === 'centro' ? Math.max(0, Math.round((ANCHO - w) / 2)) : b.ah === 'der' ? Math.max(0, ANCHO - w) : 0);
+      l.y = y0 + (horizontal ? 0 : i * avance);
+      lineas.push(l);
+    });
+    b.filas = n; b.alto = H; b.ancho = wMax;
+    b.dist = !b.scroll ? 0 : horizontal ? (wMax > ANCHO ? wMax : ANCHO) : Math.max(0, H - ALTO);
+    ev.lineas = lineas;
+  }
+  const usaLs = (ev) => !!(ev && ev.tipo === 'texto' && ev.bloque && (ev.bloque.dist > 0 || ev.bloque.alto > ALTO));   // sus renglones pueden salirse de la pantalla
+  const esScroll = (ev) => usaLs(ev) && ev.bloque.dist > 0;
+  function durEvento(ev) {      // cuanto dura en pantalla: lo que diga "Dura", o hasta el siguiente evento, o hasta el final de la cancion
+    if (ev.dur) return ev.dur;
+    const t = tIni(ev); let sig = Infinity;
+    listaAct().forEach(o => { const to = tIni(o); if (o !== ev && to > t && to < sig) sig = to; });
+    return Math.max(0, (isFinite(sig) ? sig : duracionTotalMs) - t);
+  }
+  function paramsScroll(ev) {
+    const b = ev.bloque, dist = b.dist || 0, pausa = Math.max(0, Math.round((b.pausa ?? 1) * 1000));
+    let mov;
+    if (b.auto !== false) mov = Math.max(300, durEvento(ev) - pausa - Math.max(0, Math.round((b.pausaFin ?? 1) * 1000)));
+    else mov = Math.max(1, Math.round(dist / Math.max(1, +b.vel || 10) * 1000));
+    return { pausa, mov, dist };
+  }
+  function offsetScroll(ev, dt) {      // misma cuenta que el .ino: pausa, recorrido parejo y se queda quieto al final
+    const p = paramsScroll(ev);
+    if (dt <= p.pausa) return 0;
+    if (dt >= p.pausa + p.mov) return p.dist;
+    return Math.floor(p.dist * (dt - p.pausa) / p.mov);
+  }
+  function dibujarScrollEnCanvas(ctx, ev, ms) {
+    const sc = esScroll(ev), off = sc ? offsetScroll(ev, ms - tIni(ev)) : 0, h = sc && ev.bloque.dir === 'h';
+    ctx.fillStyle = '#7fffe0';
+    (ev.lineas || []).forEach(l => {
+      const x = h ? l.x - off : l.x, y = h ? l.y : l.y - off;
+      if (esFnt(l)) dibujarTextoFnt(ctx, l, x, y); else dibujarTextoGlcd(ctx, txtOled(l.t), kLinea(l), sep8Linea(l), x, y);
+    });
+  }
+  let animScroll = null;
+  function previsualizarScroll(ev) {      // anima solo este texto en la pantalla, sin tocar la cancion
+    if (animScroll) cancelAnimationFrame(animScroll);
+    reproduciendo = false; ultimoTimestamp = null; cortaSonido(); document.getElementById('btnPlay').textContent = '▶ Reproducir';
+    const ctx = document.getElementById('pantallaOled').getContext('2d'), p = paramsScroll(ev), total = p.pausa + p.mov + 1200, ini = performance.now();
+    const paso = (ts) => {
+      const dt = ts - ini;
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ANCHO, ALTO);
+      dibujarScrollEnCanvas(ctx, ev, tIni(ev) + dt);
+      animScroll = dt < total ? requestAnimationFrame(paso) : null;
+    };
+    animScroll = requestAnimationFrame(paso);
+  }
+  function editorBloque(ev, cont) {
+    const b = ev.bloque;
+    const caja = el('div'); caja.style.gridColumn = '1 / -1';
+    const info = el('div', { className: 'aviso-char' });
+    const conFuente = () => !!(b.fuente && FNT && FNT.fuentes[b.fuente] && FNT.fuentes[b.fuente].tamanos[b.tam]);
+    const pintarInfo = () => {
+      const p = [b.filas + (b.filas === 1 ? ' renglón' : ' renglones') + ' · alto ' + b.alto + ' puntos (la pantalla tiene ' + ALTO + ')'];
+      if (esScroll(ev)) {
+        const q = paramsScroll(ev);
+        p.push('recorre ' + q.dist + ' puntos en ' + (q.mov / 1000).toFixed(1) + ' s (unos ' + (q.dist / (q.mov / 1000)).toFixed(1) + ' puntos por segundo)');
+        if (b.auto !== false && durEvento(ev) < q.pausa + 1000) p.push('¡Ojo! El evento dura poco (' + (durEvento(ev) / 1000).toFixed(1) + ' s): subí "Dura" o poné el siguiente texto más tarde.');
+      } else if (b.alto > ALTO) p.push('¡No cabe en la pantalla! Activá "Scroll" o achicá el texto: así se corta.');
+      else if (b.scroll) p.push('Cabe entero en la pantalla: se queda quieto, no hace falta scroll.');
+      const aviso = avisoChars((b.t || '').replace(/[\r\n]/g, ''), conFuente());
+      info.textContent = p.join('  ·  ') + (aviso ? '  ·  ' + aviso : '');
+    };
+    const rehacer = () => { armarBloque(ev); pintarInfo(); ver(ev); };
+    const ta = el('textarea', { className: 'ta-bloque', value: b.t, rows: 6, placeholder: 'Escribí acá. Enter = renglón nuevo. Si una línea no entra en el ancho, se parte sola en el último espacio.' });
+    ta.oninput = () => { b.t = ta.value; rehacer(); };
+    const fila = (...hijos) => el('div', { className: 'fila' }, hijos);
+    const etq = (t) => el('span', { textContent: t, style: 'font-size:.72rem; color:var(--ink-dim);' });
+    const opFuentes = (FNT ? NOMBRES_FNT.map(id => [id, FNT.fuentes[id].nombre]) : []).concat([['', '5x7 pixel (la clásica)']]);
+    const selFuente = sel(opFuentes, b.fuente || '', v => {
+      if (v) { b.fuente = v; b.tam = tamsFnt(v).includes(TAM_DEFECTO_FNT) ? TAM_DEFECTO_FNT : tamsFnt(v)[0]; } else { delete b.fuente; b.tam = 1; }
+      armarBloque(ev); renderEventos(); ver(ev);
+    });
+    const opTam = conFuente() ? tamsFnt(b.fuente).map(v => [v, v + ' pt']) : TAMS.map(v => [v, 'Tam ' + v]);
+    const selTam = sel(opTam, b.tam, v => { b.tam = +v; rehacer(); });
+    const selH = sel([['izq', '◀ Izquierda'], ['centro', '⬌ Centrado'], ['der', 'Derecha ▶']], b.ah, v => { b.ah = v; rehacer(); });
+    const selV = sel([['arriba', '▲ Arriba'], ['centro', '⬍ Centro'], ['abajo', '▼ Abajo']], b.av, v => { b.av = v; rehacer(); });
+    selV.title = 'Solo cuando el texto cabe entero en la pantalla (o si se mueve de lado)';
+    const num = (valor, min, max, step, cb) => { const i = el('input', { type: 'number', value: valor, min, max, step }); i.style.width = '70px'; i.onchange = () => { const v = parseFloat(String(i.value).replace(',', '.')); if (isFinite(v)) cb(Math.min(max, Math.max(min, v))); pintarInfo(); ver(ev); }; return i; };
+    const numInter = num(b.inter || 0, -6, 30, 1, v => { b.inter = Math.round(v); rehacer(); });
+    const chkScroll = el('input', { type: 'checkbox', checked: !!b.scroll });
+    const selDir = sel([['v', '⬆ Hacia arriba (se lee de arriba abajo)'], ['h', '⬅ De lado (de derecha a izquierda, una sola línea)']], b.dir || 'v', v => { b.dir = v; rehacer(); });
+    const chkAuto = el('input', { type: 'checkbox', checked: b.auto !== false });
+    const numVel = num(b.vel || 12, 1, 200, 1, v => { b.vel = Math.round(v); rehacer(); });
+    const numPausa = num(b.pausa ?? 1, 0, 60, 0.1, v => { b.pausa = v; rehacer(); });
+    const numPausaFin = num(b.pausaFin ?? 1, 0, 60, 0.1, v => { b.pausaFin = v; rehacer(); });
+    const opcionesScroll = el('div', { className: 'linea-ed' });
+    const pintarOpciones = () => {
+      opcionesScroll.style.display = b.scroll ? '' : 'none';
+      numVel.disabled = b.auto !== false; numPausaFin.disabled = b.auto === false;
+    };
+    chkScroll.onchange = () => { b.scroll = chkScroll.checked; pintarOpciones(); rehacer(); };
+    chkAuto.onchange = () => { b.auto = chkAuto.checked; pintarOpciones(); rehacer(); };
+    const btnVer = el('button', { className: 'chico secundario', textContent: '▶ Ver scroll' });
+    btnVer.title = 'Muestra solo este texto moviéndose en la pantalla, sin reproducir la canción';
+    btnVer.onclick = () => previsualizarScroll(ev);
+    [fila(etq('Dirección'), selDir),
+     el('label', { className: 'chk-adv', title: 'Si está apagada la velocidad no cuenta: tú eliges cuántos puntos por segundo avanza' }, [chkAuto, el('span', { textContent: 'Velocidad automática (recorre todo el texto en lo que dura el evento)' })]),
+     fila(etq('Velocidad manual'), numVel, etq('puntos/s')),
+     fila(etq('Pausa al inicio'), numPausa, etq('s'), etq('· pausa al final'), numPausaFin, etq('s'))].forEach(x => opcionesScroll.appendChild(x));
+    pintarOpciones();
+    caja.appendChild(el('div', { className: 'linea-ed' }, [
+      ta, info,
+      fila(etq('Fuente'), selFuente, etq('Tamaño'), selTam),
+      fila(etq('Alinear'), selH, selV, etq('Entre renglones'), numInter, etq('pts')),
+      el('label', { className: 'chk-adv', title: 'Activalo cuando el texto es más alto que la pantalla (o muy largo para una línea)' }, [chkScroll, el('span', { textContent: 'Scroll (el texto se desplaza)' })]),
+      opcionesScroll, fila(btnVer)]));
+    cont.appendChild(caja);
+    pintarInfo(); ver(ev);
+  }
   function editorTexto(ev, cont) {
     const caja = el('div'); caja.style.gridColumn = '1 / -1';
     ev.lineas.forEach(l => {
@@ -1980,6 +2165,21 @@ function convertirInoAEscena(src, nombre) {
     renderEventos(); actualizarEnPosicion(posicionMs, false);
   });
 
+  // ---- pestaña Textos: botones para agregar ----
+  document.getElementById('btnAgregarTextoT').addEventListener('click', () => {
+    const nuevo = { nota: notaEnPosicion(posicionMs) ?? 0, ms: Math.round(posicionMs), tipo: 'texto', bloque: bloqueNuevo(), lineas: [] };
+    armarBloque(nuevo); listaAct().push(nuevo);
+    renderEventos(); actualizarEnPosicion(posicionMs, false); setTimeout(() => ver(nuevo), 0);
+  });
+  document.getElementById('btnAgregarImagenT').addEventListener('click', () => {
+    const primera = Object.keys(escena.imagenes)[0];
+    if (!primera) { document.getElementById('fileImgTexto').click(); return; }
+    listaAct().push({ nota: notaEnPosicion(posicionMs) ?? 0, ms: Math.round(posicionMs), tipo: 'imagen', imagen: primera });
+    renderEventos(); actualizarEnPosicion(posicionMs, false);
+  });
+  document.getElementById('btnSubirImagenAcaT').onclick = () => document.getElementById('fileImgTexto').click();
+  document.getElementById('fileImgTexto').onchange = (e) => { subirImagenEvento(e.target.files[0]); e.target.value = ''; };
+
   function subirImagenEvento(file) {
     if (!file) return;
     const rd = new FileReader();
@@ -1990,7 +2190,7 @@ function convertirInoAEscena(src, nombre) {
       while (escena.imagenes[nombre]) nombre += '_';
       escena.imagenes[nombre] = { bitmap: Array.from(r.bitmap), width: r.width, height: r.height };
       const ev = { nota: notaEnPosicion(posicionMs) ?? 0, ms: Math.round(posicionMs), tipo: 'imagen', imagen: nombre };
-      escena.eventos.push(ev); renderGaleria(); renderEventos(); ver(ev);
+      listaAct().push(ev); renderGaleria(); renderEventos(); ver(ev);
     };
     rd.readAsDataURL(file);
   }
@@ -2377,17 +2577,29 @@ function convertirInoAEscena(src, nombre) {
   restaurarOpcionesConv();
 
   // ==================== tabs ====================
-  (function () {
-    const pestanas = [['tabEventosBtn', 'panelEventos'], ['tabImagenesBtn', 'panelImagenes'], ['tabConversorBtn', 'panelConversor']];
-    pestanas.forEach(([btn, panel]) => {
-      document.getElementById(btn).addEventListener('click', () => {
-        pestanas.forEach(([b, p]) => {
-          document.getElementById(b).classList.toggle('activo', b === btn);
-          document.getElementById(p).style.display = (p === panel) ? 'block' : 'none';
-        });
-      });
+  const PESTANAS = () => [['tabEventosBtn', 'panelEventos'], ['tabImagenesBtn', 'panelImagenes'], ['tabConversorBtn', 'panelConversor'], ['tabTextosBtn', 'panelTextos']];
+  function mostrarPestana(btn) {
+    PESTANAS().forEach(([b, p]) => {
+      document.getElementById(b).classList.toggle('activo', b === btn);
+      document.getElementById(p).style.display = (b === btn) ? 'block' : 'none';
     });
-  })();
+    actualizarEtiquetaPantalla();
+  }
+  function mostrarPestanaPantalla() { mostrarPestana(escena.pantalla === 'textos' ? 'tabTextosBtn' : 'tabEventosBtn'); }
+  function actualizarEtiquetaPantalla() {
+    const e = document.getElementById('etiquetaPantalla'); if (!e) return;
+    e.textContent = 'El reproductor y el .ino usan: ' + (escena.pantalla === 'textos' ? 'Textos' : 'Eventos');
+    const n = document.getElementById('notaTextos');
+    if (n) n.textContent = escena.src ? 'Este proyecto está en modo parche: el .ino de Textos no se puede exportar así. Importá el .ino sin tildar "modo parche avanzado".' : 'Lo que armes acá es aparte de la pestaña Eventos. Mientras esta pestaña esté abierta, el reproductor y el .ino salen de Textos.';
+  }
+  PESTANAS().forEach(([btn]) => {
+    document.getElementById(btn).addEventListener('click', () => {
+      if (btn === 'tabEventosBtn' || btn === 'tabTextosBtn') {
+        escena.pantalla = btn === 'tabTextosBtn' ? 'textos' : 'eventos';
+        mostrarPestana(btn); renderEventos(); actualizarEnPosicion(posicionMs, false); guardarProyectoActual();
+      } else mostrarPestana(btn);
+    });
+  });
 
   // ==================== importar .ino ====================
   document.getElementById('btnImportarIno').addEventListener('click', () => document.getElementById('modalIno').classList.add('abierto'));
@@ -2409,6 +2621,7 @@ function convertirInoAEscena(src, nombre) {
       const modoParche = document.getElementById('chkModoParche').checked;
       if (!modoParche) { nueva.eventos = []; nueva.meta = []; nueva.src = null; }
       escena = nueva; escena.imagenes = escena.imagenes || {}; escena.gifs = {}; escena.retrasoMs = 0; escena.retrasoMp3Ms = 0;
+      escena.textos = []; escena.pantalla = 'eventos'; mostrarPestanaPantalla();
       recalcularTimeline(); renderEventos(); renderGaleria();
       posicionMs = 0; actualizarEnPosicion(0, false);
       document.getElementById('retrasoSeg').value = '';
@@ -2437,8 +2650,9 @@ function convertirInoAEscena(src, nombre) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), imagenes: data.imagenes || {}, gifs: data.gifs || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0, retrasoMp3Ms: data.retrasoMp3Ms || 0 };
+        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), textos: (data.textos || []).map(migrar), pantalla: data.pantalla === 'textos' ? 'textos' : 'eventos', imagenes: data.imagenes || {}, gifs: data.gifs || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0, retrasoMp3Ms: data.retrasoMp3Ms || 0 };
         document.getElementById('inputNombreCancion').value = escena.nombre;
+        mostrarPestanaPantalla();
         recalcularTimeline(); renderEventos(); renderGaleria();
         posicionMs = 0; actualizarEnPosicion(0, false);
         document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
@@ -2532,8 +2746,9 @@ void muestra(){ display.display(); }
   document.getElementById('btnExportarIno').addEventListener('click', () => {
     if (escena.notas.length === 0) { alert('No hay ninguna canción cargada.'); return; }
     const nombreCancion = (document.getElementById('inputNombreCancion').value || 'cancion').replace(/[^a-zA-Z0-9_]/g, '_');
-    const hayGifParche = escena.src && escena.eventos.some(e => e.tipo === 'gif');
-    const ordenados = conFines([...escena.eventos].filter(e => !(escena.src && e.tipo === 'gif')).sort((a, b) => a.nota - b.nota));
+    if (escena.src && escena.pantalla === 'textos') { alert('La pestaña Textos no se puede exportar en modo parche. Importá el .ino sin tildar "modo parche avanzado".'); return; }
+    const hayGifParche = escena.src && listaAct().some(e => e.tipo === 'gif');
+    const ordenados = conFines([...listaAct()].filter(e => !(escena.src && e.tipo === 'gif')).sort((a, b) => a.nota - b.nota));
     if (hayGifParche) alert('Este proyecto está en modo parche: los eventos de GIF no se exportan (se saltearon). Importá el .ino sin tildar "modo parche avanzado" para usar GIF.');
     if (escena.src) {
       let patched = parchearIno(escena.src, ordenados);
@@ -2545,14 +2760,15 @@ void muestra(){ display.display(); }
     }
 
     // Sin estructura original: archivo nuevo. La pantalla sale en el milisegundo exacto, sin depender de las notas.
-    const ord0 = [...escena.eventos].sort((a, b) => tIni(a) - tIni(b)), esc = [];
+    const ord0 = [...listaAct()].sort((a, b) => tIni(a) - tIni(b)), esc = [];
     ord0.forEach((ev, i) => {
       const t0 = Math.round(tIni(ev)); esc.push({ t: t0, ev });
       if (ev.dur) { const tf = t0 + ev.dur, sig = ord0[i + 1]; if (!(sig && Math.round(tIni(sig)) <= tf)) esc.push({ t: tf, ev: null }); }
     });
     esc.sort((a, b) => a.t - b.t);
     const lin = (ev) => ev.lineas.filter(l => l.t);
-    const maxL = Math.max(1, ...esc.map(x => x.ev && x.ev.tipo === 'texto' ? lin(x.ev).length : 0));
+    const maxL = Math.max(1, ...esc.map(x => x.ev && x.ev.tipo === 'texto' && !usaLs(x.ev) ? lin(x.ev).length : 0));
+    const hayScroll = ord0.some(usaLs);      // algun texto no cabe en la pantalla o se desplaza: el .ino lleva el codigo del scroll
     // ---- GIF: cada GIF usado se exporta una sola vez (los cuadros repetidos comparten arreglo) y la escena apunta a su "Anim" ----
     const gifOk = (ev) => ev && ev.tipo === 'gif' && GIFS()[ev.gif] && GIFS()[ev.gif].frames.length > 0;
     const nomAnim = (ev) => 'anim_' + ev.gif + (ev.loop !== false ? '' : '_una');
@@ -2580,6 +2796,37 @@ void muestra(){ display.display(); }
                          : '// { t_ms, imagen o NULL, cantidad de renglones, { {tam, x, y, "texto"}, ... } }   (0 renglones = pantalla en blanco)';
     const defAnim = sA ? 'struct Anim   { const uint8_t* const* cuadros; const uint16_t* demoras; uint16_t n; bool repetir; unsigned long total; };   // un GIF: cuadros, ms de cada uno, cantidad, si repite, ms por vuelta\n' : '';
     const campoAnim = sA ? 'const Anim* anim; ' : '';
+    const iniScroll = () => hayScroll ? '  if (e.nls) { escScr = e.dist ? &e : NULL; scrUlt = 0; dibujaScroll(e, 0); return; }\n  escScr = NULL;\n' : '';
+    const llamaScroll = () => hayScroll ? '  revisaScroll();\n' : '';
+    const resetScroll = () => hayScroll ? '  escScr = NULL;\n' : '';
+    const funcScroll = () => hayScroll ? `// ===== Texto que se desplaza (scroll) =====
+// Va por tiempo, no por cuenta de cuadros: el desplazamiento sale del reloj, asi que si un cuadro tarda, el siguiente salta al lugar que toca.
+// dist = cuanto recorre (puntos), pausa = espera antes de empezar (ms), mov = lo que dura el recorrido (ms), dir 0 = hacia arriba, 1 = hacia la izquierda. Al terminar se queda quieto.
+const Escena* escScr = NULL;   // escena con scroll en curso
+long scrUlt = 0;               // ultimo desplazamiento dibujado
+void lineaScroll(const Linea& L, int dx, int dy) {
+  int x = L.x - dx, y = L.y - dy;
+  if (y > ALTO + 48 || y < -48) return;                 // fuera de la pantalla: no se dibuja
+${usaEsc ? '  if (L.k) { textoEsc(L.k, L.sep8, x, y, L.txt); return; }\n' : ''}${usaFnt ? '  if (L.f) { textoFnt(L.f, L.trk8, x, y, L.txt); return; }\n' : ''}  display.setTextSize(L.tam);
+  display.setTextColor(WHITE);
+  display.setCursor(x, y);
+  display.println(L.txt);
+}
+void dibujaScroll(const Escena& e, long off) {
+  display.clearDisplay();
+  for (int i = 0; i < e.nls; i++) lineaScroll(e.ls[i], e.dir ? (int)off : 0, e.dir ? 0 : (int)off);
+  display.display();
+}
+void revisaScroll() {
+  if (!escScr) return;
+  long dt = (long)((millis() - t0) - escScr->t) - (long)escScr->pausa;
+  long off = dt <= 0 ? 0 : (dt >= (long)escScr->mov ? (long)escScr->dist : (long)escScr->dist * dt / (long)escScr->mov);
+  if (off == scrUlt) return;
+  scrUlt = off;
+  dibujaScroll(*escScr, off);
+}
+
+` : '';
     const globAnim = sA ? '\n// GIF en curso: cual es, desde que ms de la melodia arranco, que cuadro se ve y cuando toca el siguiente\nconst Anim* animAct = NULL;\nunsigned long animT = 0, animProx = 0;\nint animCuadro = -1;\n' : '';
     const funcAnim = sA ? `// Dibuja el cuadro del GIF que toca segun el reloj. Va por tiempo, no por cuenta: si un cuadro tarda en dibujarse, salta al que corresponde.
 void revisaAnim() {
@@ -2617,14 +2864,30 @@ void revisaAnim() {
       return '{' + f.slice(0, 4).concat(usaEsc ? f.slice(4, 6) : [], usaFnt ? f.slice(6, 8) : []).join(', ') + '}';
     };
     const campoEsc = (usaEsc ? ' byte k; byte sep8;' : '') + (usaFnt ? ' const GFXfont* f; int8_t trk8;' : '');
-    const tipoXY = usaFnt ? 'int16_t x; int16_t y; ' : 'byte x; byte y; ';
+    const tipoXY = (usaFnt || hayScroll) ? 'int16_t x; int16_t y; ' : 'byte x; byte y; ';
     const funcEsc = (usaEsc ? bloqueEsc(lineasEsc) : '') + bFnt.helper;
     const saltoEsc = (usaEsc ? '    if (e.l[i].k) { textoEsc(e.l[i].k, e.l[i].sep8, e.l[i].x, e.l[i].y, e.l[i].txt); continue; }\n' : '') +
                      (usaFnt ? '    if (e.l[i].f) { textoFnt(e.l[i].f, e.l[i].trk8, e.l[i].x, e.l[i].y, e.l[i].txt); continue; }\n' : '');
+    // ---- textos que se desplazan (scroll): sus renglones van en un arreglo aparte (ls_N) y la escena guarda cuanto recorre y en cuanto tiempo ----
+    const campoScr = hayScroll ? ' const Linea* ls; byte nls; int16_t dist; unsigned long pausa; unsigned long mov; byte dir;' : '';
+    let arraysScroll = '', nScr = 0;
+    const itemLineaS = (l) => {      // igual que itemLinea pero SIN recortar a la pantalla: x, y son las del bloque completo
+      let f;
+      if (esFnt(l)) { const g = geomLinea(l); f = [0, l.x - g.izq, l.y + g.d.asc, bFnt.texto(l), 0, 0, '&' + nombreFnt(l), trk8Linea(l)]; }
+      else if (esEsc(l)) f = [0, l.x, l.y, cStr(txtOled(l.t)), kLinea(l), sep8Linea(l), 'NULL', 0];
+      else f = [tamEf(l), l.x, l.y, cStr(txtOled(l.t)), 0, 0, 'NULL', 0];
+      return '{' + f.slice(0, 4).concat(usaEsc ? f.slice(4, 6) : [], usaFnt ? f.slice(6, 8) : []).join(', ') + '}';
+    };
+    const filaScroll = (t, ev) => {
+      const nom = 'ls_' + (++nScr), ls = lin(ev), b = ev.bloque, sc = esScroll(ev), p = sc ? paramsScroll(ev) : { pausa: 0, mov: 1, dist: 0 };
+      arraysScroll += '// Texto de ' + ls.length + ' renglones' + (sc ? ' que se desplaza ' + (b.dir === 'h' ? 'hacia la izquierda' : 'hacia arriba') + ' (' + p.dist + ' puntos en ' + (p.mov / 1000).toFixed(1) + ' s)' : ' (no cabe en la pantalla; no se desplaza)') + '\nconst Linea ' + nom + '[] = {\n' + ls.map(l => '  ' + itemLineaS(l)).join(',\n') + '\n};\n';
+      return `  { ${t}, NULL, ${NA}0, {}, ${nom}, ${ls.length}, ${p.dist}, ${p.pausa}, ${p.mov}, ${b.dir === 'h' ? 1 : 0} },`;
+    };
     const filasEsc = esc.map(({ t, ev }) => {
       if (!ev || (ev.tipo === 'gif' && !gifOk(ev))) return `  { ${t}, NULL, ${NA}0, {} },`;
       if (ev.tipo === 'imagen') return `  { ${t}, ${escena.imagenes[ev.imagen] ? ev.imagen : 'NULL'}, ${NA}0, {} },`;
       if (ev.tipo === 'gif') return `  { ${t}, NULL, &${nomAnim(ev)}, 0, {} },`;
+      if (usaLs(ev)) return filaScroll(t, ev);
       const ls = lin(ev);
       return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => itemLinea(l)).join(', ')} } },`;
     }).join('\n');
@@ -2655,9 +2918,9 @@ const int N_NOTAS = sizeof(melodia) / sizeof(melodia[0]);
 ${comentEsc}
 #define MAXL ${maxL}
 struct Linea  { byte tam; ${tipoXY}const char* txt;${campoEsc} };
-${defAnim}struct Escena { unsigned long t; const uint8_t* img; ${campoAnim}byte n; Linea l[MAXL]; };
+${defAnim}struct Escena { unsigned long t; const uint8_t* img; ${campoAnim}byte n; Linea l[MAXL];${campoScr} };
 
-${bFnt.datos}${tablasAnim}const Escena escenas[] = {
+${bFnt.datos}${tablasAnim}${arraysScroll ? arraysScroll + '\n' : ''}const Escena escenas[] = {
 ${filasEsc}
   { 0xFFFFFFFF, NULL, ${NA}0, {} }   // fin de la lista
 };
@@ -2665,9 +2928,9 @@ ${filasEsc}
 unsigned long t0, tFin;   // t0 = inicio de la melodia, tFin = instante en que termina la nota actual
 int iEsc = 0;
 ${globAnim}
-${funcEsc}${funcAnim}void dibujaEscena(const Escena& e) {
+${funcEsc}${funcAnim}${funcScroll()}void dibujaEscena(const Escena& e) {
 ${iniDibuja}  display.clearDisplay();
-  if (e.img) display.drawBitmap(0, 0, e.img, ANCHO, ALTO, WHITE);
+${iniScroll()}  if (e.img) display.drawBitmap(0, 0, e.img, ANCHO, ALTO, WHITE);
   for (int i = 0; i < e.n; i++) {
 ${saltoEsc}    display.setTextSize(e.l[i].tam);
     display.setTextColor(WHITE);
@@ -2679,7 +2942,7 @@ ${saltoEsc}    display.setTextSize(e.l[i].tam);
 
 void revisaPantalla() {
   while (escenas[iEsc].t != 0xFFFFFFFF && millis() - t0 >= escenas[iEsc].t) dibujaEscena(escenas[iEsc++]);
-${llamaAnim}}
+${llamaAnim}${llamaScroll()}}
 
 // Espera hasta el instante t (ms) sin dejar de atender la pantalla
 void esperaHasta(unsigned long t) {
@@ -2705,7 +2968,7 @@ void setup() {
 
 void loop() {
   iEsc = 0;
-${resetLoop}  display.clearDisplay();
+${resetLoop}${resetScroll()}  display.clearDisplay();
   display.display();
   t0 = tFin = millis();
   for (int i = 0; i < N_NOTAS; i++) paso(melodia[i][0], melodia[i][1]);
@@ -2721,8 +2984,8 @@ ${resetLoop}  display.clearDisplay();
   // agrupando lo que se hace seguido (escribir, arrastrar un slider) como un único movimiento.
   const hist = { pila: [], pos: -1 };
   let escenaRef = escena, firmaVista = '', firmaEstable = '';
-  const foto = () => JSON.stringify({ e: escena.eventos, i: escena.imagenes, g: GIFS() });
-  const firma = () => JSON.stringify(escena.eventos) + Object.keys(escena.imagenes).join(',') + '|' + Object.keys(GIFS()).join(',');
+  const foto = () => JSON.stringify({ e: escena.eventos, t: escena.textos || [], i: escena.imagenes, g: GIFS() });
+  const firma = () => JSON.stringify([escena.eventos, escena.textos || []]) + Object.keys(escena.imagenes).join(',') + '|' + Object.keys(GIFS()).join(',');
   function botonesHist() {
     const u = document.getElementById('btnDeshacer'), r = document.getElementById('btnRehacer');
     u.disabled = hist.pos <= 0; r.disabled = hist.pos >= hist.pila.length - 1;
@@ -2740,7 +3003,7 @@ ${resetLoop}  display.clearDisplay();
     guardarCambio();
     if (i < 0 || i >= hist.pila.length) return;
     const d = JSON.parse(hist.pila[i]);
-    escena.eventos = d.e.map(migrar); escena.imagenes = d.i; escena.gifs = d.g || {}; hist.pos = i;
+    escena.eventos = d.e.map(migrar); escena.textos = (d.t || []).map(migrar); escena.imagenes = d.i; escena.gifs = d.g || {}; hist.pos = i;
     firmaVista = firmaEstable = firma();
     renderEventos(); renderGaleria(); actualizarEnPosicion(posicionMs, false); botonesHist();
   }
