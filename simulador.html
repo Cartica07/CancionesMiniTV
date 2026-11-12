@@ -213,13 +213,16 @@
         </div>
         <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;">Deja la canción con esa duración. <b>El final</b>: corta lo último (y borra los eventos que queden después). <b>El inicio</b>: saca lo primero y corre todo (textos, imágenes y mp3) para que arranque en 0:00. En los dos casos busca un silencio cercano al punto de corte para no partir una nota a la mitad.</p>
         <div class="fila-mp3" id="filaRetraso">
-          <span>⏱ Agregar un silencio de</span>
+          <span>⏱ Silencio</span>
+          <span>antes de empezar:</span>
           <input type="number" id="retrasoSeg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
           <span>seg</span>
-          <select id="retrasoLado"><option value="inicio">antes de empezar</option><option value="final">al terminar</option></select>
+          <span>y al terminar:</span>
+          <input type="number" id="retrasoFinSeg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
+          <span>seg</span>
           <button class="chico secundario" id="btnRetraso">Aplicar</button>
         </div>
-        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;" id="descRetraso">Agrega un silencio inicial antes de que arranque la melodía. En ese lapso (de 0 hasta ese segundo) podés poner textos o imágenes moviendo la barra ahí y usando los botones de agregar evento. Dejalo en 0 para que arranque de una.</p>
+        <p class="descripcion-campo" style="font-size:.7rem; color:var(--ink-dim); margin:4px 0 0;" id="descRetraso">Podés usar los dos a la vez. <b>Antes de empezar</b>: silencio inicial; en ese lapso podés poner textos o imágenes moviendo la barra ahí. <b>Al terminar</b>: la melodía queda en silencio ese tiempo antes de que el .ino la repita (la última imagen/texto sigue en pantalla; no corre lo que ya pusiste). Dejá 0 para sacarlo.</p>
         <div class="fila-mp3" id="filaRetrasoMp3">
           <span>🎧 Empezar a sonar el mp3 despues de</span>
           <input type="number" id="retrasoMp3Seg" min="0" step="0.1" placeholder="seg" style="width:64px;" />
@@ -486,7 +489,14 @@
   }
 
   // ==================== estado ====================
-  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, gifs: {}, retrasoMs: 0, retrasoLado: 'inicio', retrasoMp3Ms: 0 };
+  // Silencios agregados: retrasoMs = al inicio y retrasoFinMs = al final (los dos pueden estar a la vez).
+  // Los proyectos viejos guardaban un solo valor + retrasoLado ('inicio' | 'final'): se convierten al cargar.
+  function retrasosDe(o) {
+    const v = o.retrasoMs || 0;
+    if (o.retrasoFinMs !== undefined) return { ini: v, fin: o.retrasoFinMs || 0 };
+    return o.retrasoLado === 'final' ? { ini: 0, fin: v } : { ini: v, fin: 0 };
+  }
+  let escena = { nombre: 'cancion', notas: [], eventos: [], imagenes: {}, gifs: {}, retrasoMs: 0, retrasoFinMs: 0, retrasoMp3Ms: 0 };
   // Dos listas de pantalla: escena.eventos (pestaña Eventos) y escena.textos (pestaña Textos). La que se ve en el reproductor y sale en el .ino es escena.pantalla.
   const listaAct = () => escena.pantalla === 'textos' ? (escena.textos = escena.textos || []) : escena.eventos;
 
@@ -503,7 +513,7 @@
     const nombre = localStorage.getItem(CLAVE_ACTUAL);
     if (!nombre) return;
     const todos = cargarProyectos();
-    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, textos: escena.textos || [], pantalla: escena.pantalla || 'eventos', imagenes: escena.imagenes, gifs: escena.gifs || {}, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoLado: escena.retrasoLado || 'inicio', retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
+    todos[nombre] = { nombre: escena.nombre, notas: escena.notas, eventos: escena.eventos, textos: escena.textos || [], pantalla: escena.pantalla || 'eventos', imagenes: escena.imagenes, gifs: escena.gifs || {}, meta: escena.meta || [], src: escena.src || null, retrasoMs: escena.retrasoMs || 0, retrasoFinMs: escena.retrasoFinMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0, deshacerRecorte: escena.deshacerRecorte || [], actualizado: Date.now() };
     guardarProyectos(todos);
   }
   function renderSelectorProyectos() {
@@ -521,18 +531,18 @@
     const todos = cargarProyectos();
     if (!todos[nombre]) {
       if (!crearSiNoExiste) return false;
-      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, gifs: {}, meta: [], src: null, retrasoMs: 0, retrasoLado: 'inicio', retrasoMp3Ms: 0, actualizado: Date.now() };
+      todos[nombre] = { nombre, notas: [], eventos: [], imagenes: {}, gifs: {}, meta: [], src: null, retrasoMs: 0, retrasoFinMs: 0, retrasoMp3Ms: 0, actualizado: Date.now() };
       guardarProyectos(todos);
     }
     const p = todos[nombre];
-    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), textos: (p.textos || []).map(migrar), pantalla: p.pantalla === 'textos' ? 'textos' : 'eventos', imagenes: p.imagenes || {}, gifs: p.gifs || {}, meta: p.meta || [], src: p.src || null, retrasoMs: p.retrasoMs || 0, retrasoLado: p.retrasoLado || 'inicio', retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
+    escena = { nombre, notas: p.notas || [], eventos: (p.eventos || []).map(migrar), textos: (p.textos || []).map(migrar), pantalla: p.pantalla === 'textos' ? 'textos' : 'eventos', imagenes: p.imagenes || {}, gifs: p.gifs || {}, meta: p.meta || [], src: p.src || null, retrasoMs: retrasosDe(p).ini, retrasoFinMs: retrasosDe(p).fin, retrasoMp3Ms: p.retrasoMp3Ms || 0, deshacerRecorte: p.deshacerRecorte || [] };
     localStorage.setItem(CLAVE_ACTUAL, nombre);
     document.getElementById('inputNombreCancion').value = nombre;
     mostrarPestanaPantalla();
     recalcularTimeline(); renderEventos(); renderGaleria(); renderSelectorProyectos();
     posicionMs = 0; actualizarEnPosicion(0, false);
     document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
-    document.getElementById('retrasoLado').value = escena.retrasoLado || 'inicio'; actualizarDescRetraso();
+    document.getElementById('retrasoFinSeg').value = escena.retrasoFinMs ? escena.retrasoFinMs / 1000 : '';
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     sincronizarMp3Reposo();
     return true;
@@ -1443,10 +1453,9 @@ function convertirInoAEscena(src, nombre) {
 
   // ==================== timeline / audio ====================
   function recalcularTimeline() {
-    const retrasoInicio = (escena.retrasoLado === 'final') ? 0 : (escena.retrasoMs || 0);
-    inicioMs = [retrasoInicio];
+    inicioMs = [escena.retrasoMs || 0];
     for (let i = 0; i < escena.notas.length; i++) inicioMs.push(inicioMs[i] + escena.notas[i][1]);
-    duracionTotalMs = (inicioMs[escena.notas.length] || 0) + (escena.retrasoLado === 'final' ? (escena.retrasoMs || 0) : 0);
+    duracionTotalMs = (inicioMs[escena.notas.length] || 0) + (escena.retrasoFinMs || 0);
     document.getElementById('scrub').max = Math.max(1, duracionTotalMs);
     document.getElementById('tiempoTotal').textContent = formatoTiempo(duracionTotalMs);
   }
@@ -1468,6 +1477,15 @@ function convertirInoAEscena(src, nombre) {
     }
     apilarRecorte();   // guarda el estado actual para poder deshacer
     if (lado === 'inicio') { recortarInicio(objetivoMs); return; }
+    const finMelodiaMs = inicioMs[escena.notas.length] || 0;
+    if ((escena.retrasoFinMs || 0) > 0 && objetivoMs >= finMelodiaMs) {   // el corte cae dentro del silencio del final: solo se acorta
+      escena.retrasoFinMs = objetivoMs - finMelodiaMs;
+      document.getElementById('retrasoFinSeg').value = escena.retrasoFinMs / 1000;
+      recalcularTimeline();
+      renderEventos(); renderGaleria(); actualizarEnPosicion(Math.min(posicionMs, duracionTotalMs), false);
+      sellarRecorte(); guardarProyectoActual();
+      return;
+    }
     const idx = notaEnPosicion(objetivoMs);
     const VENTANA = 40; // cuantas notas mira hacia atras/adelante buscando un silencio
     const desde = Math.max(0, idx - VENTANA), hasta = Math.min(escena.notas.length - 1, idx + VENTANA);
@@ -1481,6 +1499,8 @@ function convertirInoAEscena(src, nombre) {
     const nuevaCantidad = corte + 1;
     escena.notas = escena.notas.slice(0, nuevaCantidad);
     if (escena.meta) escena.meta = escena.meta.slice(0, nuevaCantidad);
+    escena.retrasoFinMs = 0;                        // al cortar el final de la melodia, tambien se va el silencio que tenia despues
+    document.getElementById('retrasoFinSeg').value = '';
     recalcularTimeline();
     escena.eventos = escena.eventos.filter(ev => tIni(ev) < duracionTotalMs);
     escena.textos = (escena.textos || []).filter(ev => tIni(ev) < duracionTotalMs);
@@ -1493,10 +1513,10 @@ function convertirInoAEscena(src, nombre) {
 
   // ---- deshacer recorte: antes de cada recorte se guarda (hasta 5) la melodia, los eventos y los retrasos ----
   const MAX_DESHACER_RECORTE = 5;
-  const firmaRecorte = () => JSON.stringify([escena.eventos, escena.textos || [], escena.retrasoMs || 0, escena.retrasoLado || 'inicio', escena.retrasoMp3Ms || 0]);
+  const firmaRecorte = () => JSON.stringify([escena.eventos, escena.textos || [], escena.retrasoMs || 0, escena.retrasoFinMs || 0, escena.retrasoMp3Ms || 0]);
   function apilarRecorte() {
     const pila = escena.deshacerRecorte = escena.deshacerRecorte || [];
-    pila.push(JSON.parse(JSON.stringify({ notas: escena.notas, meta: escena.meta || [], eventos: escena.eventos, textos: escena.textos || [], retrasoMs: escena.retrasoMs || 0, retrasoLado: escena.retrasoLado || 'inicio', retrasoMp3Ms: escena.retrasoMp3Ms || 0 })));
+    pila.push(JSON.parse(JSON.stringify({ notas: escena.notas, meta: escena.meta || [], eventos: escena.eventos, textos: escena.textos || [], retrasoMs: escena.retrasoMs || 0, retrasoFinMs: escena.retrasoFinMs || 0, retrasoMp3Ms: escena.retrasoMp3Ms || 0 })));
     if (pila.length > MAX_DESHACER_RECORTE) pila.shift();
   }
   function sellarRecorte() {   // anota como quedo todo justo despues del recorte, para avisar si despues se editaron cosas
@@ -1516,10 +1536,10 @@ function convertirInoAEscena(src, nombre) {
         !confirm('Después del recorte cambiaste textos, imágenes o retrasos. Si deshacés el recorte, esos cambios se pierden. ¿Seguir?')) return;
     pila.pop();
     escena.notas = s.notas; escena.meta = s.meta; escena.eventos = s.eventos; escena.textos = s.textos || [];
-    escena.retrasoMs = s.retrasoMs; escena.retrasoLado = s.retrasoLado || 'inicio'; escena.retrasoMp3Ms = s.retrasoMp3Ms;
+    escena.retrasoMs = retrasosDe(s).ini; escena.retrasoFinMs = retrasosDe(s).fin; escena.retrasoMp3Ms = s.retrasoMp3Ms;
     recalcularTimeline();
     document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
-    document.getElementById('retrasoLado').value = escena.retrasoLado || 'inicio'; actualizarDescRetraso();
+    document.getElementById('retrasoFinSeg').value = escena.retrasoFinMs ? escena.retrasoFinMs / 1000 : '';
     document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
     reproduciendo = false; ultimoTimestamp = null; posicionMs = 0;
     document.getElementById('btnPlay').textContent = '▶ Reproducir';
@@ -1541,7 +1561,7 @@ function convertirInoAEscena(src, nombre) {
   // conserva en 0:00 (para que la cancion no arranque con la pantalla vacia si ya habia algo mostrandose).
   function recortarInicio(objetivoMs) {
     const corteMs = duracionTotalMs - objetivoMs;   // cuanto sacar del principio (tiempo del timeline, con el retraso inicial)
-    const retraso = (escena.retrasoLado === 'final') ? 0 : (escena.retrasoMs || 0);   // el retraso al final no es silencio inicial: no entra en este calculo
+    const retraso = escena.retrasoMs || 0;          // silencio inicial (el silencio del final no entra en este calculo)
     let k = 0, T0, nuevoRetraso = 0;                // k = notas que se sacan; T0 = instante del timeline que pasa a ser 0:00
     if (corteMs <= retraso) {                       // el corte cae dentro del silencio inicial: alcanza con acortarlo
       T0 = corteMs; nuevoRetraso = retraso - corteMs;
@@ -1580,7 +1600,7 @@ function convertirInoAEscena(src, nombre) {
     // aplicar
     escena.notas = escena.notas.slice(k);
     if (escena.meta && escena.meta.length) escena.meta = escena.meta.slice(k);
-    if (escena.retrasoLado !== 'final') escena.retrasoMs = nuevoRetraso;   // el silencio al final no cambia al cortar el inicio
+    escena.retrasoMs = nuevoRetraso;                // el silencio al final no cambia al cortar el inicio
     if (usarMp3) escena.retrasoMp3Ms = (escena.retrasoMp3Ms || 0) - T0;   // el mp3 sigue en su lugar: arranca T0 mas adentro
     recalcularTimeline();
     const aplicarT = (p) => {
@@ -1613,27 +1633,21 @@ function convertirInoAEscena(src, nombre) {
   // Si es al final: tampoco modifica escena.notas, solo estira duracionTotalMs; al exportar se suma a la
   // espera que ya existe al terminar la melodia (ver parchearIno/exportar: "esperaHasta(tFin + 1900 + ...)").
   // En los dos casos se puede llamar de nuevo para cambiar el valor sin ir acumulando silencios.
-  function actualizarDescRetraso() {
-    const d = document.getElementById('descRetraso'); if (!d) return;
-    d.textContent = (document.getElementById('retrasoLado').value === 'final')
-      ? 'Agrega un silencio al terminar la melodía, antes de que el .ino la repita desde el principio. No corre los textos ni las imágenes que ya pusiste. Dejalo en 0 para sacarlo (queda solo la pausa fija de siempre).'
-      : 'Agrega un silencio inicial antes de que arranque la melodía. En ese lapso (de 0 hasta ese segundo) podés poner textos o imágenes moviendo la barra ahí y usando los botones de agregar evento. Dejalo en 0 para que arranque de una.';
-  }
-  function aplicarRetraso(segundos, lado) {
+  function aplicarRetraso(segIni, segFin) {
     if (escena.notas.length === 0 && !escena.src) { alert('No hay ninguna cancion cargada.'); return; }
-    escena.retrasoMs = Math.max(0, Math.round(segundos * 1000));
-    escena.retrasoLado = lado === 'final' ? 'final' : 'inicio';
+    escena.retrasoMs = Math.max(0, Math.round(segIni * 1000));
+    escena.retrasoFinMs = Math.max(0, Math.round(segFin * 1000));
     recalcularTimeline();
     renderEventos(); renderGaleria();
     posicionMs = Math.min(posicionMs, duracionTotalMs);
     actualizarEnPosicion(posicionMs, false);
     guardarProyectoActual();
   }
-  document.getElementById('retrasoLado').addEventListener('change', actualizarDescRetraso);
   document.getElementById('btnRetraso').addEventListener('click', () => {
-    const v = parseFloat(document.getElementById('retrasoSeg').value || '0');
-    if (!isFinite(v) || v < 0) { alert('Poné cuántos segundos de silencio querés (0 para sacarlo).'); return; }
-    aplicarRetraso(v, document.getElementById('retrasoLado').value);
+    const vi = parseFloat(document.getElementById('retrasoSeg').value || '0');
+    const vf = parseFloat(document.getElementById('retrasoFinSeg').value || '0');
+    if (!isFinite(vi) || vi < 0 || !isFinite(vf) || vf < 0) { alert('Poné cuántos segundos de silencio querés (0 para sacarlo).'); return; }
+    aplicarRetraso(vi, vf);
   });
 
   // Retraso del mp3: no toca escena.notas ni el timeline, solo cuando arranca el audio.
@@ -2634,7 +2648,7 @@ function convertirInoAEscena(src, nombre) {
       if (nueva.notas.length === 0) throw new Error('No se encontraron notas — ¿es el .ino correcto?');
       const modoParche = document.getElementById('chkModoParche').checked;
       if (!modoParche) { nueva.eventos = []; nueva.meta = []; nueva.src = null; }
-      escena = nueva; escena.imagenes = escena.imagenes || {}; escena.gifs = {}; escena.retrasoMs = 0; escena.retrasoLado = 'inicio'; escena.retrasoMp3Ms = 0;
+      escena = nueva; escena.imagenes = escena.imagenes || {}; escena.gifs = {}; escena.retrasoMs = 0; escena.retrasoFinMs = 0; escena.retrasoMp3Ms = 0;
       escena.textos = []; escena.pantalla = 'eventos'; mostrarPestanaPantalla();
       recalcularTimeline(); renderEventos(); renderGaleria();
       posicionMs = 0; actualizarEnPosicion(0, false);
@@ -2664,13 +2678,13 @@ function convertirInoAEscena(src, nombre) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), textos: (data.textos || []).map(migrar), pantalla: data.pantalla === 'textos' ? 'textos' : 'eventos', imagenes: data.imagenes || {}, gifs: data.gifs || {}, meta: data.meta || [], src: data.src || null, retrasoMs: data.retrasoMs || 0, retrasoLado: data.retrasoLado || 'inicio', retrasoMp3Ms: data.retrasoMp3Ms || 0 };
+        escena = { nombre: data.nombre || 'cancion', notas: data.notas || [], eventos: (data.eventos || []).map(migrar), textos: (data.textos || []).map(migrar), pantalla: data.pantalla === 'textos' ? 'textos' : 'eventos', imagenes: data.imagenes || {}, gifs: data.gifs || {}, meta: data.meta || [], src: data.src || null, retrasoMs: retrasosDe(data).ini, retrasoFinMs: retrasosDe(data).fin, retrasoMp3Ms: data.retrasoMp3Ms || 0 };
         document.getElementById('inputNombreCancion').value = escena.nombre;
         mostrarPestanaPantalla();
         recalcularTimeline(); renderEventos(); renderGaleria();
         posicionMs = 0; actualizarEnPosicion(0, false);
         document.getElementById('retrasoSeg').value = escena.retrasoMs ? escena.retrasoMs / 1000 : '';
-        document.getElementById('retrasoLado').value = escena.retrasoLado || 'inicio'; actualizarDescRetraso();
+        document.getElementById('retrasoFinSeg').value = escena.retrasoFinMs ? escena.retrasoFinMs / 1000 : '';
         document.getElementById('retrasoMp3Seg').value = escena.retrasoMp3Ms ? escena.retrasoMp3Ms / 1000 : '';
         sincronizarMp3Reposo();
       } catch (err) { alert('JSON inválido: ' + err.message); }
@@ -2767,20 +2781,19 @@ void muestra(){ display.display(); }
     if (hayGifParche) alert('Este proyecto está en modo parche: los eventos de GIF no se exportan (se saltearon). Importá el .ino sin tildar "modo parche avanzado" para usar GIF.');
     if (escena.src) {
       let patched = parchearIno(escena.src, ordenados);
-      if (escena.retrasoMs > 0) {
-        if (escena.retrasoLado === 'final') {
-          // suma el silencio pedido a la pausa que ya existe al terminar la melodia (justo antes de que loop() la repita)
-          const reFin = /esperaHasta\s*\(\s*tFin\s*\+\s*(\d+)\s*\)\s*;/;
-          const mFin = patched.match(reFin);
-          if (mFin) {
-            const total = Number(mFin[1]) + escena.retrasoMs;
-            patched = patched.replace(reFin, `esperaHasta(tFin + ${total}); // pausa al terminar (antes ${mFin[1]} ms, +${escena.retrasoMs} ms de silencio agregado)`);
-          } else {
-            alert('No encontré la pausa de fin de melodía en este .ino (¿se editó a mano la función loop?). Se exporta sin el silencio final agregado.');
-          }
+      if (escena.retrasoFinMs > 0) {
+        // suma el silencio pedido a la pausa que ya existe al terminar la melodia (justo antes de que loop() la repita)
+        const reFin = /esperaHasta\s*\(\s*tFin\s*\+\s*(\d+)\s*\)\s*;/;
+        const mFin = patched.match(reFin);
+        if (mFin) {
+          const total = Number(mFin[1]) + escena.retrasoFinMs;
+          patched = patched.replace(reFin, `esperaHasta(tFin + ${total}); // pausa al terminar (antes ${mFin[1]} ms, +${escena.retrasoFinMs} ms de silencio agregado)`);
         } else {
-          patched = patched.replace(/void\s+loop\s*\(\s*\)\s*\{/, m => m + `\n  delay(${escena.retrasoMs}); // espera antes de arrancar la melodia (retraso inicial)`);
+          alert('No encontré la pausa de fin de melodía en este .ino (¿se editó a mano la función loop?). Se exporta sin el silencio final agregado.');
         }
+      }
+      if (escena.retrasoMs > 0) {
+        patched = patched.replace(/void\s+loop\s*\(\s*\)\s*\{/, m => m + `\n  delay(${escena.retrasoMs}); // espera antes de arrancar la melodia (retraso inicial)`);
       }
       descargar(nombreCancion + '.ino', patched);
       return;
@@ -2919,8 +2932,8 @@ void revisaAnim() {
       return `  { ${t}, NULL, ${NA}${ls.length}, { ${ls.map(l => itemLinea(l)).join(', ')} } },`;
     }).join('\n');
     const filasNotas = [];
-    const retrasoFinalMs = (escena.retrasoMs > 0 && escena.retrasoLado === 'final') ? escena.retrasoMs : 0;
-    const notasExport = (escena.retrasoMs > 0 && escena.retrasoLado !== 'final') ? [[0, escena.retrasoMs], ...escena.notas] : escena.notas;
+    const retrasoFinalMs = escena.retrasoFinMs > 0 ? escena.retrasoFinMs : 0;
+    const notasExport = escena.retrasoMs > 0 ? [[0, escena.retrasoMs], ...escena.notas] : escena.notas;
     for (let i = 0; i < notasExport.length; i += 8) filasNotas.push('  ' + notasExport.slice(i, i + 8).map(n => `{${n[0]}, ${n[1]}}`).join(', ') + ',');
     descargar(nombreCancion + '.ino', `// "${nombreCancion}" -- generado con el simulador de canciones OLED
 // ESP8266 + SSD1306 128x64 (I2C)
